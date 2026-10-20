@@ -1,0 +1,20 @@
+# runtime artifacts (contain workspace data: user emails, vault names, audit history)
+state/
+reports/
+approvals/
+
+# credentials — never commit
+.env
+.env.*
+!.env.example
+config/.env
+*.pem
+*.key
+*.p8
+
+# python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mcp.json

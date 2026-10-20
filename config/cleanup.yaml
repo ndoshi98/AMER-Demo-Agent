@@ -1,0 +1,55 @@
+# Fireblocks demo-console cleanup agent — configuration.
+# Unknown keys are rejected on load, so a typo can never silently disable a safeguard.
+
+workspace:
+  base_path: us            # sandbox | us | eu | eu2. A TESTNET workspace is still us/eu/eu2, NOT sandbox.
+  is_production: false     # self-declared. true additionally requires --i-understand-this-is-prod on the CLI.
+  expected_name: "Neil Doshi - Testnet [ApI Test]"  # optional: abort unless GET /workspace returns exactly this name (guards against pointing at the wrong workspace)
+
+quarantine:
+  min_consecutive_runs: 2  # floor of 2 is enforced: a first sighting is never eligible
+  min_days_flagged: 14
+
+vaults:
+  no_tx_within_days: 90    # must also have exactly-zero total/pending/staked on every asset
+  protect:
+    ids: []
+    name_patterns: []      # regexes, case-insensitive, e.g. "^Treasury", "demo-keep"
+    customer_ref_id_prefixes: []
+    tag_labels: ["keep-for-demo"]   # any vault carrying one of these tags is never flagged
+
+wallets:                   # internal + external whitelisted wallets (Tier 2, approval gate)
+  no_tx_within_days: 180
+  protect:
+    ids: []
+    name_patterns: []      # e.g. "travel rule", "counterparty"
+
+network_connections:       # Tier 2
+  no_tx_within_days: 180
+  protect:
+    ids: []
+
+tags:                      # Tier 2. "Unused" = no vault carries it (the API exposes no attachment count)
+  protect_labels: ["keep-for-demo"]
+
+users:                     # Tier 2 (request console-user deletion)
+  inactive_days: 180
+  protect_roles: ["OWNER", "ADMIN"]
+  protect_emails: []
+
+audit:
+  lookback_days: 365       # the API hard-caps at one year
+  # Event names that count as "activity". Empty = ANY audited action by the user counts.
+  # Fill in after scripts/probe.py shows which event names your workspace really emits.
+  activity_events: []
+
+approvals:
+  max_age_days: 30         # approval files older than this are refused
+
+rate_limit:
+  max_calls_per_second: 3
+
+paths:
+  state_dir: state
+  reports_dir: reports
+  approvals_dir: approvals
