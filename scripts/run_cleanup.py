@@ -21,7 +21,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
-from fbcleanup import actions, collect, report, rules, tap  # noqa: E402
+from fbcleanup import actions, collect, report, rules, tap, tap_consolidate  # noqa: E402
 from fbcleanup.client import ApiError, FireblocksClient  # noqa: E402
 from fbcleanup.config import (ConfigError, enforce_prod_gate, load_config, load_credentials, load_env_file,  # noqa: E402
                               scope_paths)
@@ -87,6 +87,7 @@ def main() -> int:
             state.ingest_audit(inv.audit_events, cfg.audit_activity_events)
 
         tap_rules, tap_findings, tap_path, refs = [], [], None, None
+        consolidation = None
         if inv.policy is not None:
             tap_rules = tap.rules_from_policy(inv.policy)
             refs = set().union(*(r.refs for r in tap_rules)) if tap_rules else set()
@@ -94,6 +95,9 @@ def main() -> int:
             vaults = {str(v.get("id")) for v in inv.vaults} if "vault" in inv.ok else None
             tap_findings = tap.analyze(tap_rules, users, vaults)
             proposed = tap.propose(tap_rules, tap_findings)
+            raw = tap_consolidate.raw_rules(inv.policy)
+            consolidation = {"strict": tap_consolidate.consolidate(raw), "default_deny": tap_consolidate.consolidate(raw, True)}
+            proposed["consolidation"] = {k: tap_consolidate.plan_to_dict(v) for k, v in consolidation.items()}
             tap_path = Path(cfg.reports_dir) / f"tap-proposed-{run_id}.json"
             tap_path.parent.mkdir(parents=True, exist_ok=True)
             tap_path.write_text(json.dumps(proposed, indent=2), encoding="utf-8")
@@ -116,7 +120,7 @@ def main() -> int:
                                    executed=args.execute, cfg=cfg, workspace_name=ws_name, inv=inv, decisions=decisions,
                                    state=state, tier1=tier1, apply_outcomes=apply_out, poll_outcomes=poll,
                                    proposal_path=proposal, tap_rules=tap_rules, tap_findings=tap_findings,
-                                   tap_proposal_path=tap_path,
+                                   tap_proposal_path=tap_path, consolidation=consolidation,
                                    observed=args.apply_approvals or not args.no_observe)
         print(f"report: {report.write_report(text, cfg.reports_dir, run_id)}")
         if proposal:

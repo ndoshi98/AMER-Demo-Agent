@@ -35,15 +35,15 @@ Built and verified against a **testnet** workspace first. The report is the prod
 
 ## Architecture (keep this shape)
 
-`collect.py` read-only → `rules.py` pure classification → `actions.py` only mutator → `tap.py` pure policy analysis
+`collect.py` read-only → `rules.py` pure classification → `actions.py` only mutator → `tap.py` + `tap_consolidate.py` pure policy analysis
 → `state.py` SQLite → `client.py` SDK wrapper (single `call()` choke point: dry-run, rate limit, JSONL journal)
 → `report.py` markdown. `config.py` loads/validates YAML. Never replace an SDK call with hand-rolled HTTP.
 The `OPS` table in `client.py` is verified against the installed SDK by `scripts/probe.py --offline`.
 
 ## Tests
 
-`pytest` — offline, no SDK calls, no credentials. `test_tap.py` and `test_quarantine.py` guard the two places a bug
-does real damage. Run them before touching `tap.py` or `state.py`.
+`pytest` — offline, no SDK calls, no credentials. `test_tap.py`, `test_tap_consolidate.py` and `test_quarantine.py` guard the places a bug
+does real damage. Run them before touching `tap.py`, `tap_consolidate.py` or `state.py`.
 
 ## Credentials
 

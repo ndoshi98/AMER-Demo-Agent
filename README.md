@@ -3,9 +3,9 @@
 Cleanup agent for the shared AMER (demo) Fireblocks workspace. It hides empty vaults, proposes TAP consolidation, and
 requests deletion of dormant console users. **Dry run by default. Nothing changes unless you pass `--execute`.**
 
-Status: built and unit-tested offline (92 tests). On the Testnet workspace, `probe.py --online`, dry-run audits, a Tier 1
-`--execute` (29 vaults hidden) and `--undo-run` (all 29 restored) have been run. Tier 2 deletions and
-`--apply-approvals` have not been run anywhere. The AMER (demo) workspace has not been touched.
+Status: built and unit-tested offline (106 tests). On the Testnet workspace, `probe.py --online`, dry-run audits, a Tier 1
+`--execute` (29 vaults hidden) and `--undo-run` (all 29 restored) have been run. A Tier 2
+`--apply-approvals --execute` has deleted one internal wallet on Testnet. Connection, tag and user deletions have not been run. The AMER (demo) workspace has not been touched.
 
 ## Workspaces
 
@@ -35,6 +35,12 @@ Exactly two workspaces are in scope. The agent is never pointed at any other.
 | 1 | Hide / unhide empty vaults | Automatic with `--execute`, after quarantine. Reversible (`--undo-run`). |
 | 2 | Delete external/internal wallets, network connections, tags; request console-user deletion | YAML approval file, `approved: true`, applied in a **later** run with `--apply-approvals --execute` |
 | 3 | TAP consolidation, vault renames | Propose only. A human publishes the policy. |
+
+TAP consolidation (`tap_consolidate.py`) removes duplicate and unreachable rules and merges rules that differ in one
+dimension (asset, source, destination or amount range). Every step is verified: the original and proposed rule lists
+must give the same outcome in every case the policy can distinguish. It reports two proposals: behaviour-identical, and
+one that also drops a BLOCK rule if transactions matching no rule are blocked (an unverified assumption). It also lists
+transactions that match no rule. Rules it can't model exactly are left in place and nothing moves across them.
 
 Hard constraints (details in `CLAUDE.md`):
 
@@ -153,7 +159,11 @@ Steps 1 to 5 run only against the Testnet workspace. Step 6 is the only step tha
 7. **Tier 1 tag add/remove is not implemented.** `create_tag` and vault renames beyond duplicate-name suggestions
    are also missing. The tag-based protection only works if people tag vaults by hand.
 8. **Tag usage** is derived from vault tags only. Contact-tag usage is not checked.
-9. **Policy analysis coverage.** Only the v2 `TRANSFER` type is collected. The v2 adapter parses the one live testnet
+9. **Policy analysis coverage.** Consolidation models only v2 rules with `INCLUDES` blocks, USD amount ranges and no
+    `amountOverTime`; anything else is opaque. Named asset/source/destination values are assumed able to overlap, which
+    blocks some merges. Amount bounds are assumed inclusive. It gives up beyond 10 distinct value groups in one
+    dimension. Verified on the 4-rule testnet policy and on random policies against a brute-force check, not yet on
+    AMER's real policies. Only the v2 `TRANSFER` type is collected. The v2 adapter parses the one live testnet
     policy (3 simple rules) but is otherwise untested on real policies, and the legacy adapter is unvalidated
     (the legacy endpoint 500s here). v2 dimensions are equality-only, so MERGEABLE and shadow findings are
     under-reported. Legacy amount semantics are not modelled. Union-of-rules shadowing is not detected. Rules the

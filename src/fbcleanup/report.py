@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from . import tap as T
+from . import tap_consolidate as TC
 from .actions import Outcome
 from .collect import Inventory
 from .config import Config
@@ -31,11 +32,35 @@ def _findings_block(title: str, findings: List[T.Finding], rules: List[T.Rule]) 
     return out + [""]
 
 
+def _consolidation_block(plans: Dict[str, TC.Plan]) -> List[str]:
+    strict, deny = plans["strict"], plans["default_deny"]
+    out = ["#### C. Consolidation (verified against every case the policy can distinguish)", "",
+           f"{strict.original} rule(s) today. **{len(strict.rules)}** after behaviour-identical consolidation; "
+           f"**{len(deny.rules)}** if transactions matching no rule are blocked (assumption, see below). "
+           "The full proposed rule lists are in the `consolidation` section of the proposal JSON.", ""]
+    for title, plan in (("Behaviour-identical (always safe)", strict),
+                        ("Additional only if a transaction matching no rule is blocked", deny)):
+        steps = plan.steps if plan is strict else [s for s in deny.steps if s.detail not in {x.detail for x in strict.steps}]
+        out += [f"**{title}:**", ""]
+        out += [f"- {s.kind}: {s.detail}" for s in steps] or ["- none"]
+        out += [""]
+    if strict.note:
+        out += [f"> {strict.note}", ""]
+    if strict.gaps:
+        out += [f"**Coverage gaps** — {strict.gap_total} case(s) match NO rule (assumes amount bounds are inclusive):", ""]
+        out += [f"- {g}" for g in strict.gaps] + [""]
+    if strict.opaque:
+        out += ["Opaque rules were left in place and nothing was moved across them.", ""]
+    out += ["> The default-deny column assumes the workspace blocks transactions that match no rule. This has not been "
+            "verified from the API; confirm it in the console before relying on it.", ""]
+    return out
+
+
 def build_report(*, run_id: str, now: int, mode: str, executed: bool, cfg: Config, workspace_name: str,
                  inv: Inventory, decisions: List[Decision], state: State, tier1: List[Outcome],
                  apply_outcomes: List[Outcome], poll_outcomes: List[Outcome], proposal_path: Optional[Path],
                  tap_rules: List[T.Rule], tap_findings: List[T.Finding], tap_proposal_path: Optional[Path],
-                 observed: bool = True) -> str:
+                 observed: bool = True, consolidation: Optional[Dict[str, TC.Plan]] = None) -> str:
     L: List[str] = []
     env = "PRODUCTION" if cfg.is_production else "non-production (declared)"
     L += [f"# Cleanup report `{run_id}`", "",
@@ -99,6 +124,8 @@ def build_report(*, run_id: str, now: int, mode: str, executed: bool, cfg: Confi
         L += _findings_block("B. Judgment calls (never automated)", [f for f in tap_findings if not f.safe], tap_rules)
         if tap_proposal_path:
             L += [f"Proposed rule set (safe removals only): `{tap_proposal_path}`. A human publishes — this tool never does.", ""]
+        if consolidation:
+            L += _consolidation_block(consolidation)
 
     # ---- 4. quarantine
     if observed:
