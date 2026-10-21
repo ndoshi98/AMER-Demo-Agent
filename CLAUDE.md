@@ -27,6 +27,8 @@ Built and verified against a **testnet** workspace first. The report is the prod
 - Approval-file rule: every irreversible deletion goes through the file, whether or not a quorum or TAP also applies
   (so the file covers wallets, connections, tags and console users). Only reversible actions (hide/unhide) or
   propose-only output (TAP, renames) stay outside it. Do not exempt an op from the file because it looks ungated.
+  The quorum on user deletion is a second gate, not a substitute: the file decides whether the agent asks, carries
+  the evidence, and is the only human gate for non-quorum deletions (README: "Why Tier 2 needs an approval file").
 - Quarantine: nothing acts on first sighting. Needs `min_consecutive_runs` (floor 2) AND `min_days_flagged`.
   Released entities restart from zero. Acted entities never re-enter.
 - Everything is dry-run unless `--execute`. `is_production: true` additionally needs `--i-understand-this-is-prod`;

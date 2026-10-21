@@ -66,6 +66,27 @@ Hard constraints (details in `CLAUDE.md`):
   `--i-understand-this-is-prod`. No config key bypasses it. `workspace.expected_name` refuses to run against a
   differently named workspace.
 
+### Why Tier 2 needs an approval file when some deletions have a quorum
+
+Console-user deletion is quorum-gated: the API call only *requests* it, and it completes after the workspace quorum
+approves (default: Owner only). Wallet, connection and tag deletion have no known quorum (the Testnet internal-wallet
+delete ran with only the approval file; delete semantics are still unverified, known issue 4). The file stays for every
+Tier 2 action because:
+
+- **It decides whether the agent asks at all.** The quorum approves a request that already exists. Without the file,
+  every dormant-user guess would become a pending quorum request.
+- **It is the only human gate for wallets, connections and tags.**
+- **It carries the evidence.** A quorum approver sees "delete user X"; the file records why (quarantine history, days
+  flagged, the weak audit-log evidence), which makes rubber-stamping less likely.
+- **The quorum can be loosened.** Anyone with the right role can change it in Settings > Quorums, so it is not a
+  guarantee the agent can rely on.
+
+Fireblocks' own audit log records the request and the quorum approval, so outcomes for user deletions can be
+reconciled from it (the agent already confirms completion by polling for `enabled: false`). That is an outcome record,
+not a replacement for the decision record. Decision made 2026-10-21: keep the file for all Tier 2 actions, including
+user deletions. Shared review of approval files happens through the private audit repo
+(`AMER-Demo-Agent-auditlogs_and_approvals`), never this public one.
+
 ## Setup
 
 ```bash
