@@ -1,10 +1,32 @@
 # AMER-Demo-Agent
 
-Cleanup agent for a shared Fireblocks GTM demo workspace. It hides empty vaults, proposes TAP consolidation, and
+Cleanup agent for the shared AMER (demo) Fireblocks workspace. It hides empty vaults, proposes TAP consolidation, and
 requests deletion of dormant console users. **Dry run by default. Nothing changes unless you pass `--execute`.**
 
-Status: built and unit-tested offline (88 tests). The read-only `probe.py --online` has been run against the testnet
-workspace. No audit, `--execute` or approval run has been done yet.
+Status: built and unit-tested offline (92 tests). On the Testnet workspace, `probe.py --online`, dry-run audits, a Tier 1
+`--execute` (29 vaults hidden) and `--undo-run` (all 29 restored) have been run. Tier 2 deletions and
+`--apply-approvals` have not been run anywhere. The AMER (demo) workspace has not been touched.
+
+## Workspaces
+
+Exactly two workspaces are in scope. The agent is never pointed at any other.
+
+| | Testnet | AMER (demo) |
+|---|---|---|
+| Role | Rehearsal. Every action is tried here first, including destructive ones. | The only mainnet / production workspace. The real shared demo console. |
+| Name (`workspace.expected_name`) | `Neil Doshi - Testnet [ApI Test]` | The exact AMER demo workspace name. Not yet configured. |
+| `workspace.is_production` | `false` | `true`, which also requires `--i-understand-this-is-prod` |
+| Config | `config/cleanup.yaml` | A separate file, passed with `--config` |
+| State, reports, approvals | `state/`, `reports/`, `approvals/` under `neil-doshi-testnet-api-test/` | Same folders under the AMER slug, e.g. `amer-demo/`. Never shared. |
+| API key | Testnet key in `config/.env` | A separate AMER key. Never use one key for both. |
+
+- Testnet uses `base_path: us`, the same production API host a mainnet workspace would use, so the base path says
+  nothing about which workspace you are on. `expected_name` is the guard, and the run aborts if the name differs.
+- **State is scoped per workspace.** `state/`, `reports/` and `approvals/` each get a subfolder named after
+  `workspace.expected_name` (lowercased, punctuation replaced by `-`). That folder holds the quarantine ledger,
+  action journal, reports and approval files, so ids like vault `1` can never collide across workspaces. The run
+  refuses to start without `expected_name`, and aborts if the real workspace name differs.
+- Nothing is aimed at AMER until the Testnet plan below is done.
 
 ## What it does
 
@@ -34,8 +56,9 @@ Hard constraints (details in `CLAUDE.md`):
   re-classifies from fresh data and skips anything no longer flagged.
 - **Tier 2 never executes in the run that proposes it.** It requires `approved: true` (a real boolean), an approval
   file under 30 days old, and a different run id.
-- **Prod gate.** `workspace.is_production: true` also requires `--i-understand-this-is-prod`. No config key bypasses it.
-  `workspace.expected_name` refuses to run against a differently named workspace.
+- **Prod gate.** AMER is the only workspace with `workspace.is_production: true`, and that also requires
+  `--i-understand-this-is-prod`. No config key bypasses it. `workspace.expected_name` refuses to run against a
+  differently named workspace.
 
 ## Setup
 
@@ -48,7 +71,8 @@ chmod 600 /path/to/your/secret.key      # the loader refuses key files with loos
 `config/.env`, key files, `state/`, `reports/` and `approvals/` are gitignored. This repo is public, so never commit
 them.
 
-Edit `config/cleanup.yaml`. Unknown keys are rejected. Set `workspace.expected_name` to the exact workspace name.
+Edit `config/cleanup.yaml` for Testnet. Unknown keys are rejected. For AMER, copy it to a separate config file, set
+`expected_name` and `is_production: true`, and pass it with `--config`. `expected_name` is required. See Workspaces.
 
 ## Usage
 
@@ -57,7 +81,7 @@ Edit `config/cleanup.yaml`. Unknown keys are rejected. Set `workspace.expected_n
 .venv/bin/python -m pytest -q
 .venv/bin/python scripts/probe.py --offline        # resolves every OPS entry against the installed SDK
 
-# 1. read-only probe of the real workspace (permissions, audit event names, shapes)
+# 1. read-only probe of the workspace (permissions, audit event names, shapes)
 .venv/bin/python scripts/probe.py --online
 
 # 2. audit: collect, classify, report. Dry run.
@@ -71,7 +95,7 @@ Edit `config/cleanup.yaml`. Unknown keys are rejected. Set `workspace.expected_n
 .venv/bin/python scripts/run_cleanup.py --apply-approvals            # dry run
 .venv/bin/python scripts/run_cleanup.py --apply-approvals --execute
 
-# undo a run's hides
+# undo a run's hides (also releases them from the ledger, so quarantine restarts from zero)
 .venv/bin/python scripts/run_cleanup.py --undo-run <run-id> --execute
 ```
 
@@ -80,14 +104,17 @@ ledger and `journal.jsonl`).
 
 ## Testnet-first plan
 
-1. `probe.py --offline`, then `probe.py --online` against the testnet workspace. Read the output before anything else.
-2. Dry-run audits with `--no-observe` until the report looks right.
-3. Normal dry-run audits across at least two runs 14+ days apart, to exercise quarantine.
-4. `--execute` for Tier 1 only. Check the result in the console, then try `--undo-run`.
-5. Tier 2 on a few throwaway objects.
-6. Point at the real demo workspace. Set `expected_name` and `is_production` correctly.
+Steps 1 to 5 run only against the Testnet workspace. Step 6 is the only step that touches AMER.
 
-## Known issues and risks (to fix or verify before the real workspace)
+1. `probe.py --offline`, then `probe.py --online` against Testnet. Read the output before anything else. (done)
+2. Dry-run audits with `--no-observe` until the report looks right. (done)
+3. Normal dry-run audits across at least two runs 14+ days apart, to exercise quarantine. (the Testnet round used
+   `min_days_flagged: 0` to shortcut this; AMER uses 14)
+4. `--execute` for Tier 1 only. Check the result in the console, then try `--undo-run`. (done)
+5. Tier 2 on a few throwaway objects, created by hand in the Testnet console.
+6. Point at AMER with its own config, key and `state_dir`. Start with a read-only probe and `--no-observe` audits.
+
+## Known issues and risks (to fix or verify before AMER)
 
 ### Settled by `probe.py --online` against the testnet workspace (2026-10-20)
 - **API key permissions: sufficient for every read.** Vaults, transactions, console users, audit logs, v2 TRANSFER
@@ -108,7 +135,8 @@ ledger and `journal.jsonl`).
   on the `'*'` wildcard. The SDK falls back to the raw JSON and the data is intact, so it's cosmetic.
 
 ### Still to verify
-1. **Write permission**, which only the first `--execute` run reveals.
+1. **Write permission** is settled for Testnet (hide and unhide worked). Tier 2 delete permission is still untested, and
+   AMER's key needs its own check.
 2. **Non-audit pagination.** Vault paging worked (60 vaults, complete). The transaction time-walk, network-connection
    and wallet list shapes are still assumed.
 3. **Tags.** The `next` cursor isn't implemented, so a multi-page tag list is marked incomplete.
@@ -140,5 +168,6 @@ ledger and `journal.jsonl`).
 
 ### Environment
 15. **Testnet workspaces use the production base path** (`us`/`eu`/`eu2`), so `is_production` is self-declared. Set
-    `expected_name` to guard against hitting the wrong workspace.
+    `expected_name` to guard against hitting the wrong workspace. It is required, and it also names the per-workspace
+    state folder.
 16. Python 3.9 with LibreSSL prints a urllib3 `NotOpenSSLWarning`. It is harmless but noisy.
