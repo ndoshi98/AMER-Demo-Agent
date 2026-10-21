@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 import stat
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -167,6 +168,23 @@ def load_credentials() -> Tuple[str, str]:
     if p.stat().st_mode & (stat.S_IRWXG | stat.S_IRWXO):
         raise ConfigError(f"{p} is readable by group/others — chmod 600 it before use")
     return api_key, p.read_text(encoding="utf-8")
+
+
+def workspace_slug(name: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+    if not slug:
+        raise ConfigError("workspace.expected_name is required: it scopes state, reports and approvals per workspace")
+    return slug
+
+
+def scope_paths(cfg: Config, root: Path) -> Path:
+    """Point state/reports/approvals at <dir>/<workspace-slug>/ (absolute). Returns the scoped state dir.
+
+    Ids such as vault "1" exist in every workspace, so the ledger, journal and approval files must never be shared."""
+    slug = workspace_slug(cfg.expected_name)
+    for attr in ("state_dir", "reports_dir", "approvals_dir"):
+        setattr(cfg, attr, str(root / getattr(cfg, attr) / slug))
+    return Path(cfg.state_dir)
 
 
 def enforce_prod_gate(cfg: Config, confirmed_prod: bool) -> None:

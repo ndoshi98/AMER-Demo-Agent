@@ -145,6 +145,11 @@ class State:
                         (now, key[0], key[1]))
         self.db.commit()
 
+    def release(self, key: Key) -> None:
+        """Forget an entity entirely (e.g. after its action was undone) so it restarts quarantine from zero."""
+        self.db.execute("DELETE FROM quarantine WHERE entity_type=? AND entity_id=?", key)
+        self.db.commit()
+
     def is_acted(self, key: Key) -> bool:
         row = self._row(key)
         return bool(row and row["status"] == "acted")

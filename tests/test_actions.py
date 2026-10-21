@@ -199,3 +199,15 @@ def test_api_failure_marks_item_failed_and_hint_never_mentions_force(make_client
     assert not st.is_acted(d.key)
     f = next((tmp_path / "approvals").glob("*.yaml"))
     assert yaml.safe_load(f.read_text())["items"][0]["status"] == "failed"
+
+
+def test_undo_releases_the_ledger_so_the_vault_restarts_quarantine(make_client, tmp_path):
+    st, d = State(":memory:"), vault_decision()
+    quarantined(st, [d])
+    resp = {("vaults", "get_vault_account"): {"id": "1", "name": "Empty", "assets": []},
+            ("vaults", "hide_vault_account"): {}, ("vaults", "unhide_vault_account"): {}}
+    cl, _ = make_client(resp, dry_run=False, run_id="live")
+    A.execute_tier1(cl, st, [d], cfg(tmp_path), T1)
+    assert st.is_acted(d.key)
+    A.undo_hides(cl, str(tmp_path / "journal.jsonl"), "live", st)
+    assert st.progress(d.key) is None and not st.eligible(d.key, T1 + DAY, 2, 0)

@@ -87,8 +87,8 @@ def _vault_name(client, vid: str) -> str:
         return vid
 
 
-def undo_hides(client, journal_path: str, run_id: str) -> List[Outcome]:
-    """Unhide every vault this run hid, per the action journal."""
+def undo_hides(client, journal_path: str, run_id: str, state=None) -> List[Outcome]:
+    """Unhide every vault this run hid, per the action journal. Released from the ledger so quarantine restarts."""
     outcomes: List[Outcome] = []
     p = Path(journal_path)
     if not p.exists():
@@ -100,7 +100,9 @@ def undo_hides(client, journal_path: str, run_id: str) -> List[Outcome]:
             name = _vault_name(client, vid)
             try:
                 res = client.call("unhide_vault", vault_account_id=vid)
-                outcomes.append(Outcome(("vault", vid), name, "would_execute" if res is DRY_RUN else "executed", "unhide"))
+                outcomes.append(Outcome(("vault", vid), name, "would_execute" if res is DRY_RUN else "executed", "undone"))
+                if state is not None and res is not DRY_RUN:
+                    state.release(("vault", str(vid)))
             except ApiError as exc:
                 outcomes.append(Outcome(("vault", vid), name, "failed", str(exc)))
     return outcomes

@@ -1,0 +1,28 @@
+from pathlib import Path
+
+import pytest
+
+from fbcleanup.config import ConfigError, parse_config, scope_paths, workspace_slug
+
+
+def test_slug_is_filesystem_safe_and_stable():
+    assert workspace_slug("Neil Doshi - Testnet [ApI Test]") == "neil-doshi-testnet-api-test"
+    assert workspace_slug("AMER (demo)") == "amer-demo"
+
+
+def test_expected_name_is_required_to_scope_paths():
+    for name in ("", "  ", "[]"):
+        with pytest.raises(ConfigError):
+            workspace_slug(name)
+    with pytest.raises(ConfigError):
+        scope_paths(parse_config({}), Path("/r"))
+
+
+def test_two_workspaces_never_share_state_reports_or_approvals():
+    a = parse_config({"workspace": {"expected_name": "Testnet One"}})
+    b = parse_config({"workspace": {"expected_name": "AMER (demo)"}})
+    sa, sb = scope_paths(a, Path("/r")), scope_paths(b, Path("/r"))
+    assert sa == Path("/r/state/testnet-one") and sb == Path("/r/state/amer-demo")
+    for attr in ("state_dir", "reports_dir", "approvals_dir"):
+        assert getattr(a, attr) != getattr(b, attr)
+        assert getattr(a, attr).endswith("testnet-one") and getattr(b, attr).endswith("amer-demo")

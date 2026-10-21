@@ -23,7 +23,8 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from fbcleanup import actions, collect, report, rules, tap  # noqa: E402
 from fbcleanup.client import ApiError, FireblocksClient  # noqa: E402
-from fbcleanup.config import ConfigError, enforce_prod_gate, load_config, load_credentials, load_env_file  # noqa: E402
+from fbcleanup.config import (ConfigError, enforce_prod_gate, load_config, load_credentials, load_env_file,  # noqa: E402
+                              scope_paths)
 from fbcleanup.state import State  # noqa: E402
 
 
@@ -48,6 +49,7 @@ def main() -> int:
         load_env_file(str(ROOT / "config" / ".env"))
         cfg = load_config(args.config)
         enforce_prod_gate(cfg, args.i_understand_this_is_prod)
+        state_dir = scope_paths(cfg, ROOT)
         api_key, secret = load_credentials()
     except ConfigError as exc:
         print(f"config/credentials problem: {exc}", file=sys.stderr)
@@ -55,15 +57,12 @@ def main() -> int:
 
     now = int(time.time())
     run_id = datetime.fromtimestamp(now, tz=timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    state_dir = ROOT / cfg.state_dir
-    for attr in ("state_dir", "reports_dir", "approvals_dir"):
-        setattr(cfg, attr, str(ROOT / getattr(cfg, attr)))
     client = FireblocksClient.connect(api_key, secret, cfg.base_path, dry_run=not args.execute, run_id=run_id,
                                       journal_path=str(state_dir / "journal.jsonl"),
                                       max_calls_per_second=cfg.max_calls_per_second,
                                       is_production=cfg.is_production, confirmed_prod=args.i_understand_this_is_prod)
     print(f"run {run_id} | {'EXECUTE' if args.execute else 'DRY RUN'} | base_path={cfg.base_path} "
-          f"prod={cfg.is_production}")
+          f"prod={cfg.is_production} | workspace={cfg.expected_name!r} | state={state_dir}")
 
     try:
         ws_name = (client.call("get_workspace") or {}).get("name", "")
@@ -72,8 +71,10 @@ def main() -> int:
             return 3
 
         if args.undo_run:
-            for o in actions.undo_hides(client, str(state_dir / "journal.jsonl"), args.undo_run):
-                print(f"  {o.status}: unhide vault {o.name} {o.detail}")
+            state = State(str(state_dir / "state.db"))
+            for o in actions.undo_hides(client, str(state_dir / "journal.jsonl"), args.undo_run, state):
+                print(f"  {o.status}: unhide vault {o.name}")
+            state.close()
             return 0
 
         state = State(str(state_dir / "state.db"))
