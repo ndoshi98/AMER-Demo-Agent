@@ -80,6 +80,13 @@ def execute_tier1(client, state: State, decisions: List[R.Decision], cfg: Config
     return outcomes
 
 
+def _vault_name(client, vid: str) -> str:
+    try:
+        return (client.call("get_vault", vault_account_id=vid) or {}).get("name") or vid
+    except Exception:  # noqa: BLE001 - a name is cosmetic; never block an unhide on it
+        return vid
+
+
 def undo_hides(client, journal_path: str, run_id: str) -> List[Outcome]:
     """Unhide every vault this run hid, per the action journal."""
     outcomes: List[Outcome] = []
@@ -90,11 +97,12 @@ def undo_hides(client, journal_path: str, run_id: str) -> List[Outcome]:
         e = json.loads(line)
         if e["run_id"] == run_id and e["op"] == "hide_vault" and e["outcome"] == "ok":
             vid = e["kwargs"]["vault_account_id"]
+            name = _vault_name(client, vid)
             try:
                 res = client.call("unhide_vault", vault_account_id=vid)
-                outcomes.append(Outcome(("vault", vid), vid, "would_execute" if res is DRY_RUN else "executed", "unhide"))
+                outcomes.append(Outcome(("vault", vid), name, "would_execute" if res is DRY_RUN else "executed", "unhide"))
             except ApiError as exc:
-                outcomes.append(Outcome(("vault", vid), vid, "failed", str(exc)))
+                outcomes.append(Outcome(("vault", vid), name, "failed", str(exc)))
     return outcomes
 
 

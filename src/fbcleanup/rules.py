@@ -168,22 +168,40 @@ def _classify_wallets(inv, cfg, policy_refs, etype, wallets, action) -> List[Dec
     return out
 
 
+def _net_label(side: Any) -> str:
+    if isinstance(side, dict):
+        return str(side.get("name") or side.get("id") or "?")
+    return str(side or "?")
+
+
 def classify_connections(inv: Inventory, cfg: Config, policy_refs: Optional[Set[str]]) -> List[Decision]:
+    """Flag only on positive evidence of disuse: no tx in the window AND visible history reaches back that far.
+
+    Otherwise "never used" is indistinguishable from "created recently" (no creation date is exposed), so the
+    connection is kept and listed for a manual decision."""
+    days = cfg.connection_no_tx_days
+    covered = inv.history_start is not None and inv.history_start <= inv.now - days * DAY
     out = []
     for c in inv.network_connections:
         cid = str(c.get("id"))
-        name = f"{c.get('localNetworkId', '?')} <-> {c.get('remoteNetworkId', '?')}"
-        keep = []
+        name = f"{_net_label(c.get('localNetworkId'))} <-> {_net_label(c.get('remoteNetworkId'))}"
+        keep, manual = [], ""
         if cid in cfg.connection_protect.ids:
             keep.append("explicitly protected id")
-        last = _recent(inv, ("network_connection", cid), cfg.connection_no_tx_days)
+        last = _recent(inv, ("network_connection", cid), days)
         if last:
-            keep.append(f"transaction on {_fmt(last)} (within {cfg.connection_no_tx_days}d)")
+            keep.append(f"transaction on {_fmt(last)} (within {days}d)")
+        elif not covered:
+            seen = f"history visible only from {_fmt(inv.history_start)}" if inv.history_start else "no transactions visible"
+            keep.append(f"unproven: no transaction visible, but {seen}, less than {days}d")
+            manual = (f"no transaction seen, but the API shows less than {days} days of history, so unused cannot be "
+                      "told from newly created; decide by hand")
         if policy_refs is not None and f"connection:{cid}" in policy_refs:
             keep.append("referenced by a TAP rule")
         flagged = not keep
         out.append(Decision("network_connection", cid, name, DELETE_NETWORK_CONNECTION, flagged,
-                            [f"no transactions in {cfg.connection_no_tx_days}d"] if flagged else [], keep))
+                            [f"no transactions in {days}d (visible history covers the full window)"] if flagged else [],
+                            keep, manual))
     return out
 
 
@@ -259,8 +277,7 @@ def suggest_renames(inv: Inventory) -> List[Decision]:
         if len(vs) > 1 and norm:
             for v in vs:
                 out.append(Decision("vault", str(v.get("id")), v.get("name") or "", SUGGEST_RENAME, False, [], [],
-                                    f"name is shared by {len(vs)} vaults (ids {', '.join(str(x.get('id')) for x in vs)}); "
-                                    "consider disambiguating by hand"))
+                                    f"name is shared by {len(vs)} vaults; consider disambiguating by hand"))
     return out
 
 

@@ -34,7 +34,8 @@ def _findings_block(title: str, findings: List[T.Finding], rules: List[T.Rule]) 
 def build_report(*, run_id: str, now: int, mode: str, executed: bool, cfg: Config, workspace_name: str,
                  inv: Inventory, decisions: List[Decision], state: State, tier1: List[Outcome],
                  apply_outcomes: List[Outcome], poll_outcomes: List[Outcome], proposal_path: Optional[Path],
-                 tap_rules: List[T.Rule], tap_findings: List[T.Finding], tap_proposal_path: Optional[Path]) -> str:
+                 tap_rules: List[T.Rule], tap_findings: List[T.Finding], tap_proposal_path: Optional[Path],
+                 observed: bool = True) -> str:
     L: List[str] = []
     env = "PRODUCTION" if cfg.is_production else "non-production (declared)"
     L += [f"# Cleanup report `{run_id}`", "",
@@ -56,7 +57,7 @@ def build_report(*, run_id: str, now: int, mode: str, executed: bool, cfg: Confi
     manual = [d for d in decisions if d.manual]
     if manual:
         L += ["**Manual console actions (this tool cannot do these):**", ""]
-        L += [f"- {d.name or d.entity_id}: {d.manual}" for d in manual]
+        L += list(dict.fromkeys(f"- {d.name or d.entity_id}: {d.manual}" for d in manual))
         L += [""]
     if tap_findings:
         judg = [f for f in tap_findings if not (f.safe)]
@@ -100,7 +101,12 @@ def build_report(*, run_id: str, now: int, mode: str, executed: bool, cfg: Confi
             L += [f"Proposed rule set (safe removals only): `{tap_proposal_path}`. A human publishes — this tool never does.", ""]
 
     # ---- 4. quarantine
-    L += ["## 4. Still in quarantine", ""]
+    if observed:
+        L += ["## 4. Still in quarantine", ""]
+    else:
+        L += ["## 4. Currently flagged (NOT observed this run)", "",
+              "`--no-observe`: quarantine clocks were not advanced. These are flagged by today's data; "
+              "Runs/First flagged reflect earlier observing runs only.", ""]
     pend = [d for d in decisions if d.flagged and d.tier in (1, 2)
             and not state.eligible(d.key, now, cfg.min_consecutive_runs, cfg.min_days_flagged)]
     if pend:
@@ -128,7 +134,8 @@ def build_report(*, run_id: str, now: int, mode: str, executed: bool, cfg: Confi
     renames = [d for d in decisions if d.action == "suggest_rename"]
     if renames:
         L += ["**Rename suggestions (Tier 3, never applied):**", ""] + \
-             [f"- vault `{d.entity_id}` “{d.name}”: {d.manual}" for d in renames] + [""]
+             [f"- “{d.name}” (vault id {d.entity_id}, shown only because the names are identical): {d.manual}"
+              for d in renames] + [""]
     near = [d for d in decisions if d.action == "hide_vault" and not d.flagged and d.keep_reasons
             and not any(k.startswith(("already hidden", "non-zero")) for k in d.keep_reasons)]
     if near:

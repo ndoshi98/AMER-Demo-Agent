@@ -24,8 +24,8 @@ wallets:                   # internal + external whitelisted wallets (Tier 2, ap
     ids: []
     name_patterns: []      # e.g. "travel rule", "counterparty"
 
-network_connections:       # Tier 2
-  no_tx_within_days: 180
+network_connections:       # Tier 2. Flagged only if visible tx history reaches back this far; else listed for manual decision
+  no_tx_within_days: 365
   protect:
     ids: []
 

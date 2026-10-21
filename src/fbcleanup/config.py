@@ -50,7 +50,7 @@ class Config:
     vault_protect: Protect = field(default_factory=Protect)
     wallet_no_tx_days: int = 180
     wallet_protect: Protect = field(default_factory=Protect)
-    connection_no_tx_days: int = 180
+    connection_no_tx_days: int = 365
     connection_protect: Protect = field(default_factory=Protect)
     tag_protect_labels: List[str] = field(default_factory=list)
     user_inactive_days: int = 180
@@ -116,7 +116,7 @@ def parse_config(raw: Optional[Dict[str, Any]]) -> Config:
         vault_protect=_protect(va, _PROTECT_KEYS),
         wallet_no_tx_days=_int(wa.get("no_tx_within_days", 180), "wallets.no_tx_within_days"),
         wallet_protect=_protect(wa, {"ids", "name_patterns"}),
-        connection_no_tx_days=_int(nc.get("no_tx_within_days", 180), "network_connections.no_tx_within_days"),
+        connection_no_tx_days=_int(nc.get("no_tx_within_days", 365), "network_connections.no_tx_within_days"),
         connection_protect=_protect(nc, {"ids"}),
         tag_protect_labels=list(map(str, tg.get("protect_labels") or [])),
         user_inactive_days=_int(us.get("inactive_days", 180), "users.inactive_days", 1),

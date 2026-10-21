@@ -3,7 +3,7 @@
 Cleanup agent for a shared Fireblocks GTM demo workspace. It hides empty vaults, proposes TAP consolidation, and
 requests deletion of dormant console users. **Dry run by default. Nothing changes unless you pass `--execute`.**
 
-Status: built and unit-tested offline (78 tests). The read-only `probe.py --online` has been run against the testnet
+Status: built and unit-tested offline (88 tests). The read-only `probe.py --online` has been run against the testnet
 workspace. No audit, `--execute` or approval run has been done yet.
 
 ## What it does
@@ -100,6 +100,9 @@ ledger and `journal.jsonl`).
   shows 19 `Archived` events in 30 days. So "already hidden" detection can't work from the listing, and vault-tag
   usage counts ignore hidden vaults. Unhide by id still works.
 - **v2 policy shape** (`{policy: {rules: [...]}, validation}`) parses cleanly: 3 rules, none opaque.
+- **TAP signers can be API users**, not only console users. `list_api_users` is now collected and merged with console
+  users for the dead-reference check (skipped entirely if either list fails to load), which removed a false
+  DEAD_REF on the testnet policy.
 - **Legacy `/tap/active_policy` returns 500** on this workspace. v2 works, so nothing depends on legacy here.
 - **SDK noise.** The v2 policy response triggers a pydantic "Failed to deserialize ... AssetTypesConfigInner" warning
   on the `'*'` wildcard. The SDK falls back to the raw JSON and the data is intact, so it's cosmetic.
@@ -114,24 +117,28 @@ ledger and `journal.jsonl`).
 ### Design gaps
 5. **No vault creation time.** A fresh empty vault prepared for an upcoming demo can be hidden after 14 days. Use the
    `keep-for-demo` tag, `protect.name_patterns`, and `--undo-run`.
-6. **Tier 1 tag add/remove is not implemented.** `create_tag` and vault renames beyond duplicate-name suggestions
+6. **Connection threshold is 365 days, but the API shows only ~200 days of transaction history** (testnet, as of
+   2026-10-21). A connection is flagged only when visible history reaches back the full window. Until then,
+   connections with no visible transaction are kept and listed for a manual decision, because unused cannot be
+   told from newly created. Expect flagging to start around March 2027.
+7. **Tier 1 tag add/remove is not implemented.** `create_tag` and vault renames beyond duplicate-name suggestions
    are also missing. The tag-based protection only works if people tag vaults by hand.
-7. **Tag usage** is derived from vault tags only. Contact-tag usage is not checked.
-8. **Policy analysis coverage.** Only the v2 `TRANSFER` type is collected. The v2 adapter parses the one live testnet
+8. **Tag usage** is derived from vault tags only. Contact-tag usage is not checked.
+9. **Policy analysis coverage.** Only the v2 `TRANSFER` type is collected. The v2 adapter parses the one live testnet
     policy (3 simple rules) but is otherwise untested on real policies, and the legacy adapter is unvalidated
     (the legacy endpoint 500s here). v2 dimensions are equality-only, so MERGEABLE and shadow findings are
     under-reported. Legacy amount semantics are not modelled. Union-of-rules shadowing is not detected. Rules the
     analyzer can't model are treated as opaque and never dropped.
-9. **Dry-run audits advance the quarantine ledger.** Use `--no-observe` for previews. The 14-day span limits damage
+10. **Dry-run audits advance the quarantine ledger.** Use `--no-observe` for previews. The 14-day span limits damage
     from rapid reruns. `--apply-approvals` relies on the ledger from the last audit plus a fresh re-classification.
 
 ### Console user deletion
-10. Needs a quorum (default: Owner only), so expect `2760` until the quorum is adjusted in Settings > Quorums.
-11. Users pending onboarding need their invite revoked in the console by hand.
-12. Users referenced in TAP are protected, and the reference must be cleaned up first.
-13. Completion is confirmed only when a later poll shows `enabled: false`.
+11. Needs a quorum (default: Owner only), so expect `2760` until the quorum is adjusted in Settings > Quorums.
+12. Users pending onboarding need their invite revoked in the console by hand.
+13. Users referenced in TAP are protected, and the reference must be cleaned up first.
+14. Completion is confirmed only when a later poll shows `enabled: false`.
 
 ### Environment
-14. **Testnet workspaces use the production base path** (`us`/`eu`/`eu2`), so `is_production` is self-declared. Set
+15. **Testnet workspaces use the production base path** (`us`/`eu`/`eu2`), so `is_production` is self-declared. Set
     `expected_name` to guard against hitting the wrong workspace.
-15. Python 3.9 with LibreSSL prints a urllib3 `NotOpenSSLWarning`. It is harmless but noisy.
+16. Python 3.9 with LibreSSL prints a urllib3 `NotOpenSSLWarning`. It is harmless but noisy.

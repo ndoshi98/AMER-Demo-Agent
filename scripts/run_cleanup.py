@@ -73,7 +73,7 @@ def main() -> int:
 
         if args.undo_run:
             for o in actions.undo_hides(client, str(state_dir / "journal.jsonl"), args.undo_run):
-                print(f"  {o.status}: unhide vault {o.key[1]} {o.detail}")
+                print(f"  {o.status}: unhide vault {o.name} {o.detail}")
             return 0
 
         state = State(str(state_dir / "state.db"))
@@ -89,7 +89,7 @@ def main() -> int:
         if inv.policy is not None:
             tap_rules = tap.rules_from_policy(inv.policy)
             refs = set().union(*(r.refs for r in tap_rules)) if tap_rules else set()
-            users = {str(u.get("id")): bool(u.get("enabled")) for u in inv.console_users} if "user" in inv.ok else None
+            users = collect.known_user_ids(inv)
             vaults = {str(v.get("id")) for v in inv.vaults} if "vault" in inv.ok else None
             tap_findings = tap.analyze(tap_rules, users, vaults)
             proposed = tap.propose(tap_rules, tap_findings)
@@ -115,7 +115,8 @@ def main() -> int:
                                    executed=args.execute, cfg=cfg, workspace_name=ws_name, inv=inv, decisions=decisions,
                                    state=state, tier1=tier1, apply_outcomes=apply_out, poll_outcomes=poll,
                                    proposal_path=proposal, tap_rules=tap_rules, tap_findings=tap_findings,
-                                   tap_proposal_path=tap_path)
+                                   tap_proposal_path=tap_path,
+                                   observed=args.apply_approvals or not args.no_observe)
         print(f"report: {report.write_report(text, cfg.reports_dir, run_id)}")
         if proposal:
             print(f"approval file: {proposal}")

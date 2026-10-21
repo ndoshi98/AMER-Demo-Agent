@@ -11,6 +11,7 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 Key = Tuple[str, str]
 TX_PAGE = 200
+ACTIVITY_MARGIN_DAYS = 30   # walk past the longest threshold so "history covers the window" is provable
 VAULT_PAGE = 500
 PEER_TYPE_TO_ENTITY = {
     "VAULT_ACCOUNT": "vault",
@@ -29,7 +30,9 @@ class Inventory:
     network_connections: List[Dict[str, Any]] = field(default_factory=list)
     tags: List[Dict[str, Any]] = field(default_factory=list)
     console_users: List[Dict[str, Any]] = field(default_factory=list)
+    api_users: List[Dict[str, Any]] = field(default_factory=list)
     activity: Dict[Key, int] = field(default_factory=dict)       # (entity_type, id) -> last tx epoch seconds
+    history_start: Optional[int] = None                          # oldest tx the API showed us (epoch s); None if none
     audit_events: List[Dict[str, Any]] = field(default_factory=list)
     policy: Optional[Dict[str, Any]] = None
     policy_source: str = ""
@@ -73,9 +76,12 @@ def collect_vaults(client, max_pages: int = 400) -> Tuple[List[Dict[str, Any]], 
     return out, False  # page cap hit: incomplete
 
 
-def collect_activity(client, since_s: int, max_pages: int = 1000) -> Tuple[Dict[Key, int], bool]:
-    """Walk transaction history newest->oldest, recording the latest tx time per source/destination entity."""
+def collect_activity(client, since_s: int, max_pages: int = 1000) -> Tuple[Dict[Key, int], bool, Optional[int]]:
+    """Walk transaction history newest->oldest, recording the latest tx time per source/destination entity.
+
+    Third element is the oldest transaction time seen: how far back the visible history actually reaches."""
     activity: Dict[Key, int] = {}
+    earliest: Optional[int] = None
     before_ms: Optional[int] = None
     after_ms = since_s * 1000
     for _ in range(max_pages):
@@ -84,13 +90,14 @@ def collect_activity(client, since_s: int, max_pages: int = 1000) -> Tuple[Dict[
             kw["before"] = str(before_ms)
         page = _items(client.call("list_transactions", **kw))
         if not page:
-            return activity, True
+            return activity, True, earliest
         oldest = None
         for tx in page:
             created = tx.get("createdAt")
             ts = _ts_seconds(created)
             if ts is None:
                 continue
+            earliest = ts if earliest is None else min(earliest, ts)
             oldest = created if oldest is None else min(oldest, created)
             peers = [tx.get("source"), tx.get("destination")]
             peers += [d.get("destination") for d in tx.get("destinations") or []]
@@ -102,11 +109,11 @@ def collect_activity(client, since_s: int, max_pages: int = 1000) -> Tuple[Dict[
                     key = (etype, str(peer["id"]))
                     activity[key] = max(activity.get(key, 0), ts)
         if len(page) < TX_PAGE:
-            return activity, True
+            return activity, True, earliest
         if oldest is None or (before_ms is not None and float(oldest) >= before_ms):
-            return activity, False  # no forward progress: refuse to claim completeness
+            return activity, False, earliest  # no forward progress: refuse to claim completeness
         before_ms = int(float(oldest))
-    return activity, False
+    return activity, False, earliest
 
 
 def normalize_audit_event(e: Dict[str, Any]) -> Dict[str, Any]:
@@ -129,6 +136,14 @@ def collect_audit(client, since_s: int, until_s: int, max_pages: int = 2000) -> 
         if not cursor:
             return events, True
     return events, False
+
+
+def known_user_ids(inv: Inventory) -> Optional[Dict[str, bool]]:
+    """id -> enabled across console AND API users, for TAP dead-reference checks.
+    None unless both lists were collected: a partial map would report real signers as missing."""
+    if not {"user", "api_user"} <= inv.ok:
+        return None
+    return {str(u.get("id")): bool(u.get("enabled")) for u in inv.console_users + inv.api_users}
 
 
 def audit_event_names(events: List[Dict[str, Any]]) -> Counter:
@@ -187,10 +202,16 @@ def collect_all(client, now: int, cfg) -> Inventory:
         inv.console_users = _items(users, "users")
         inv.ok.add("user")
 
-    longest = max(cfg.vault_no_tx_days, cfg.wallet_no_tx_days, cfg.connection_no_tx_days)
+    api_users = attempt("api_user", lambda: client.call("list_api_users"))
+    if api_users is not None:
+        inv.api_users = _items(api_users, "users")
+        inv.ok.add("api_user")
+
+    longest = max(cfg.vault_no_tx_days, cfg.wallet_no_tx_days, cfg.connection_no_tx_days) + ACTIVITY_MARGIN_DAYS
     act = attempt("activity", lambda: collect_activity(client, now - longest * 86400))
     if act:
         inv.activity = act[0]
+        inv.history_start = act[2]
         if act[1]:
             inv.ok.add("activity")
         else:

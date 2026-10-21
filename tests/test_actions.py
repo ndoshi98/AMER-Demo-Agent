@@ -46,7 +46,7 @@ def test_tier1_dry_run_then_execute_then_undo(make_client, tmp_path):
     st = State(":memory:")
     d = vault_decision()
     quarantined(st, [d])
-    resp = {("vaults", "get_vault_account"): {"id": "1", "assets": [{"id": "BTC", "total": "0"}]},
+    resp = {("vaults", "get_vault_account"): {"id": "1", "name": "Empty", "assets": [{"id": "BTC", "total": "0"}]},
             ("vaults", "hide_vault_account"): {}, ("vaults", "unhide_vault_account"): {}}
 
     cl, sdk = make_client(resp, dry_run=True)
@@ -59,7 +59,7 @@ def test_tier1_dry_run_then_execute_then_undo(make_client, tmp_path):
     assert A.execute_tier1(cl, st, [d], cfg(tmp_path), T1 + DAY) == []  # acted: never re-queued
 
     undo = A.undo_hides(cl, str(tmp_path / "journal.jsonl"), "live")
-    assert [o.status for o in undo] == ["executed"] and sdk.calls("unhide_vault_account")[0][2] == {"vault_account_id": "1"}
+    assert [o.status for o in undo] == ["executed"] and undo[0].name == "Empty" and sdk.calls("unhide_vault_account")[0][2] == {"vault_account_id": "1"}
 
 
 def test_tier1_skips_when_balance_changed_since_classification(make_client, tmp_path):

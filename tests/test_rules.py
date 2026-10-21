@@ -118,3 +118,37 @@ def test_protected_roles_tap_refs_disabled_and_pending_are_kept():
     assert not one(users(inv(console_users=[user()]), cov=0, refs={"user:u1"})).flagged
     pending = one(users(inv(console_users=[user(status="PENDING_ACTIVATION")]), cov=0))
     assert "revoke the invite" in pending.manual.lower()
+
+
+def test_connection_name_is_readable_not_a_dict_repr():
+    from fbcleanup.rules import classify_connections
+    conn = {"id": "c1", "localNetworkId": {"id": "1", "name": "Mine"}, "remoteNetworkId": {"id": "2", "name": "LP"}}
+    assert one(classify_connections(inv(network_connections=[conn]), CFG, set())).name == "Mine <-> LP"
+
+
+# --- connections: flag only on positive evidence of disuse --------------------------------------
+def _conn(i):
+    from fbcleanup.rules import classify_connections
+    return one(classify_connections(i, CFG, set()))
+
+
+def test_connection_with_no_tx_and_short_history_is_kept_and_listed_for_manual_decision():
+    d = _conn(inv(network_connections=[{"id": "c1"}], history_start=NOW - 203 * DAY))
+    assert not d.flagged and "decide by hand" in d.manual and "unproven" in d.keep_reasons[0]
+
+
+def test_connection_with_no_tx_and_no_visible_history_at_all_is_not_flagged():
+    d = _conn(inv(network_connections=[{"id": "c1"}], history_start=None))
+    assert not d.flagged and d.manual
+
+
+def test_connection_flagged_when_history_covers_full_window_and_no_tx():
+    d = _conn(inv(network_connections=[{"id": "c1"}], history_start=NOW - 380 * DAY,
+                  activity={("network_connection", "c1"): NOW - 370 * DAY}))
+    assert d.flagged and not d.manual
+
+
+def test_connection_with_tx_inside_window_is_kept_even_with_full_history():
+    d = _conn(inv(network_connections=[{"id": "c1"}], history_start=NOW - 380 * DAY,
+                  activity={("network_connection", "c1"): NOW - 154 * DAY}))
+    assert not d.flagged and not d.manual
