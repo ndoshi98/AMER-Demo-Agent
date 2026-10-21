@@ -21,10 +21,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
-from fbcleanup import actions, collect, report, rules, tap, tap_consolidate  # noqa: E402
+from fbcleanup import actions, audit_repo, collect, report, rules, tap, tap_consolidate  # noqa: E402
 from fbcleanup.client import ApiError, FireblocksClient  # noqa: E402
 from fbcleanup.config import (ConfigError, enforce_prod_gate, load_config, load_credentials, load_env_file,  # noqa: E402
-                              scope_paths)
+                              scope_paths, workspace_slug)
 from fbcleanup.state import State  # noqa: E402
 
 
@@ -75,6 +75,20 @@ def main() -> int:
             print(f"REFUSING: workspace is {ws_name!r} but workspace.expected_name is {cfg.expected_name!r}", file=sys.stderr)
             return 3
 
+        gate = None
+        if args.apply_approvals:
+            if cfg.audit_repo_path:
+                try:
+                    gate = audit_repo.make_gate(cfg.audit_repo_path, workspace_slug(cfg.expected_name))
+                except audit_repo.AuditRepoError as exc:
+                    print(f"REFUSING: cannot read reviewed approvals from the audit repo: {exc}", file=sys.stderr)
+                    return 4
+                print(f"approvals must also be approved on origin/main of {cfg.audit_repo_path}")
+            elif cfg.is_production:
+                print("REFUSING: production apply needs audit_repo.path in the config so approvals are checked "
+                      "against the reviewed audit repo", file=sys.stderr)
+                return 4
+
         if args.undo_run:
             state = State(str(state_dir / "state.db"))
             for o in actions.undo_hides(client, str(state_dir / "journal.jsonl"), args.undo_run, state):
@@ -112,7 +126,7 @@ def main() -> int:
         tier1, apply_out, proposal = [], [], None
         if args.apply_approvals:
             still = {d.key for d in decisions if d.flagged}
-            apply_out = actions.apply_approvals(client, state, cfg, run_id, now, still, args.force_user_delete)
+            apply_out = actions.apply_approvals(client, state, cfg, run_id, now, still, args.force_user_delete, gate)
         else:
             if not args.no_observe:
                 flagged = {d.key for d in decisions if d.flagged and d.tier in (1, 2)}

@@ -3,7 +3,7 @@
 Cleanup agent for the shared AMER (demo) Fireblocks workspace. It hides empty vaults, proposes TAP consolidation, and
 requests deletion of dormant console users. **Dry run by default. Nothing changes unless you pass `--execute`.**
 
-Status: built and unit-tested offline (108 tests). On the Testnet workspace, `probe.py --online`, dry-run audits, a Tier 1
+Status: built and unit-tested offline (120 tests). On the Testnet workspace, `probe.py --online`, dry-run audits, a Tier 1
 `--execute` (29 vaults hidden) and `--undo-run` (all 29 restored) have been run. A Tier 2
 `--apply-approvals --execute` has deleted one internal wallet on Testnet. Connection, tag and user deletions have not been run. A read-only pull of the AMER (demo) TAP policy has been analyzed (see item 9); nothing in AMER has been changed.
 
@@ -125,12 +125,37 @@ Testnet key can't be used by accident. Local AMER/test configs are gitignored.
 .venv/bin/python scripts/run_cleanup.py --apply-approvals            # dry run
 .venv/bin/python scripts/run_cleanup.py --apply-approvals --execute
 
+# 5. shared review of Tier 2 approvals through the private audit repo (see "Shared review" below)
+.venv/bin/python scripts/sync_audit.py                     # dry run: what would go to a PR branch
+.venv/bin/python scripts/sync_audit.py --execute           # push a branch + open a PR (never writes to main)
+.venv/bin/python scripts/sync_audit.py --pull --execute    # after merge: copy reviewer approvals into local files
+
 # undo a run's hides (also releases them from the ledger, so quarantine restarts from zero)
 .venv/bin/python scripts/run_cleanup.py --undo-run <run-id> --execute
 ```
 
 Outputs: `reports/` (markdown report and `tap-proposed-<run>.json`), `approvals/` (Tier 2 YAML), `state/` (SQLite
 ledger and `journal.jsonl`).
+
+### Shared review of Tier 2 approvals
+
+Reports, journals and approval files can be pushed to a private audit repo (`AMER-Demo-Agent-auditlogs_and_approvals`)
+so several people review approvals in a PR. Set `audit_repo.path` (a local clone) in the workspace config.
+
+1. Audit run proposes `approvals-<run>.yaml` (all `approved: false`).
+2. `sync_audit.py --execute` pushes a branch and opens a PR. It refuses unless `gh` confirms the repo is private, it
+   never writes to `main`, it will not carry a new approval file that has any item approved, and it will not overwrite a
+   reviewed approval file with different decisions. Journals are only appended to.
+3. Reviewers set `approved: true` on the items they accept (on the PR branch) and merge.
+4. The operator runs `sync_audit.py --pull --execute`, which only sets `approved: true` on matching still-pending local
+   items.
+5. `run_cleanup.py --apply-approvals` additionally fetches `origin/main` of the audit repo and executes an item only if
+   the same item (id, entity, action, run) is `approved: true` there. A hand-edited local file cannot execute. If the
+   fetch fails, the run refuses. **A production config without `audit_repo.path` refuses `--apply-approvals`.**
+
+Limits: the check proves the decision exists on `origin/main`, not that a second person made it. Enforce that with
+GitHub branch protection (required reviews, no direct pushes to `main`), which needs a plan that supports it for private
+repos. The operator machine still needs the API key, and `--execute` is still a human choice.
 
 ## Testnet-first plan
 

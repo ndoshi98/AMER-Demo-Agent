@@ -53,3 +53,6 @@ paths:
   state_dir: state
   reports_dir: reports
   approvals_dir: approvals
+
+# audit_repo:   # optional locally; REQUIRED for production configs (see README: Shared review)
+#   path: ~/AMER-Demo-Agent-auditlogs_and_approvals

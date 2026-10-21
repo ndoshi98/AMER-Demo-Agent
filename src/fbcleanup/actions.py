@@ -154,9 +154,11 @@ def propose_tier2(state: State, decisions: List[R.Decision], cfg: Config, run_id
 
 
 def apply_approvals(client, state: State, cfg: Config, run_id: str, now: int, still_flagged: set,
-                    force_user_delete: bool = False) -> List[Outcome]:
+                    force_user_delete: bool = False, gate=None) -> List[Outcome]:
     """`still_flagged`: keys flagged by a FRESH classification made at the start of this apply run.
-    Fail-closed: an approved item whose entity is not in that set (used since, collection failed, ...) is skipped."""
+    Fail-closed: an approved item whose entity is not in that set (used since, collection failed, ...) is skipped.
+    `gate(filename, doc, item)`: if given, returns None when the item is also approved in the reviewed audit repo,
+    else a reason; a refused item is skipped and left pending."""
     outcomes: List[Outcome] = []
     for f in _approval_files(cfg.approvals_dir):
         doc = yaml.safe_load(f.read_text(encoding="utf-8")) or {}
@@ -169,6 +171,11 @@ def apply_approvals(client, state: State, cfg: Config, run_id: str, now: int, st
             if doc.get("run_id") == run_id:
                 outcomes.append(Outcome(key, name, "skipped", "proposed in this same run — refusing"))
                 continue
+            if gate is not None:
+                refused = gate(f.name, doc, it)
+                if refused:
+                    outcomes.append(Outcome(key, name, "skipped", f"not approved in the audit repo: {refused}; left pending"))
+                    continue
             if now - _parse_iso(doc["created_at"]) > cfg.approval_max_age_days * DAY:
                 it["status"], it["detail"] = "expired", f"older than {cfg.approval_max_age_days}d; re-run to re-propose"
                 outcomes.append(Outcome(key, name, "expired", it["detail"]))
@@ -211,6 +218,38 @@ def apply_approvals(client, state: State, cfg: Config, run_id: str, now: int, st
         if changed:
             _write_yaml_atomic(f, doc)
     return outcomes
+
+
+def merge_reviewed_approvals(approvals_dir: str, reviewed: Dict[str, Dict[str, Any]], write: bool) -> List[str]:
+    """Bring reviewer decisions from the audit repo's origin/main into the local approval files.
+    Only ever sets `approved: true` on a still-pending local item whose identity matches; never un-approves and
+    never edits anything else. Files not present locally are written as reviewed. Returns a description per change."""
+    notes: List[str] = []
+    for name, rdoc in sorted(reviewed.items()):
+        path = Path(approvals_dir) / name
+        if not path.exists():
+            notes.append(f"{name}: new file from audit repo")
+            if write:
+                _write_yaml_atomic(path, rdoc)
+            continue
+        doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        if (doc.get("run_id"), doc.get("created_at")) != (rdoc.get("run_id"), rdoc.get("created_at")):
+            notes.append(f"{name}: skipped, local file is from a different run than the reviewed one")
+            continue
+        approved = {_ident(i) for i in rdoc.get("items") or [] if i.get("approved") is True}
+        changed = False
+        for it in doc.get("items") or []:
+            if it.get("status") == "pending" and it.get("approved") is not True and _ident(it) in approved:
+                it["approved"] = True
+                changed = True
+                notes.append(f"{name}: approved {it.get('id')} ({it.get('name', '')})")
+        if changed and write:
+            _write_yaml_atomic(path, doc)
+    return notes
+
+
+def _ident(it: Dict[str, Any]) -> tuple:
+    return (it.get("id"), it.get("entity_type"), str(it.get("entity_id")), it.get("action"))
 
 
 def poll_user_deletions(client, cfg: Config, now: int) -> List[Outcome]:
