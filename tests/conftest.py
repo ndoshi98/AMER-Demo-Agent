@@ -16,6 +16,7 @@ class _Group:
             raise AttributeError(name)
 
         def call(**kw):
+            assert kw.pop("_request_timeout", None), "every SDK call must carry a request timeout"
             self._log.append((self._group, name, kw))
             val = self._responses[(self._group, name)]
             val = val(**kw) if callable(val) else val
@@ -31,7 +32,7 @@ class _Group:
 
 class FakeSDK:
     GROUPS = ("vaults", "console_user", "external_wallets", "internal_wallets", "network_connections", "tags",
-              "workspace", "transactions", "users", "audit_logs", "policy_editor_v2", "policy_editor_beta", "api_user")
+              "workspace", "transactions", "users", "audit_logs", "policy_editor_v2", "policy_editor_beta", "api_user", "blockchains_assets")
 
     def __init__(self, responses=None):
         self.log = []

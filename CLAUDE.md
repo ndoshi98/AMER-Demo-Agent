@@ -35,6 +35,14 @@ Built and verified against a **testnet** workspace first. The report is the prod
   no config key may bypass that.
 - `base_path` is NOT a production signal: testnet workspaces use `us`/`eu`/`eu2` too.
 
+- Fund movement exists only in `sweep.py` / `sweep_value.py` and `scripts/sweep.py` / `scripts/sweep_small.py`
+  (`create_transaction`, plus `create_vault_asset` for destination wallets). Cleanup code (`run_cleanup.py`,
+  `actions.py`) must never call them. Sweeps require `--limit`/`--all` to execute and stop at the first
+  non-COMPLETED transfer.
+- **Testnet assets are NOT worth $0.** The console reports `amountUSD` on testnet transactions (ETH_TEST5 ~ ETH). Value
+  caps must price testnet and mainnet alike, and an unpriced asset leaves its vault alone. Treating testnet as $0
+  once moved vaults worth thousands of dollars.
+
 ## Architecture (keep this shape)
 
 `collect.py` read-only → `rules.py` pure classification → `actions.py` only mutator → `tap.py` + `tap_consolidate.py` pure policy analysis

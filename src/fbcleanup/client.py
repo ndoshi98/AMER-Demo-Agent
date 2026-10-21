@@ -28,6 +28,10 @@ OPS: Dict[str, Tuple[str, Tuple[str, ...]]] = {
     "list_network_connections": ("network_connections", ("get_network_connections",)),
     "list_tags": ("tags", ("get_tags",)),
     "list_api_users": ("api_user", ("get_api_users",)),
+    "get_transaction": ("transactions", ("get_transaction",)),
+    "estimate_fee": ("transactions", ("estimate_transaction_fee",)),
+    "get_asset": ("blockchains_assets", ("get_asset",)),
+    "list_blockchains": ("blockchains_assets", ("list_blockchains",)),
     "get_policy_legacy": ("policy_editor_beta", ("get_active_policy_legacy",)),
     "get_policy_v2": ("policy_editor_v2", ("get_active_policy",)),
     # --- mutations (must also be listed in MUTATING_OPS) ---
@@ -38,13 +42,15 @@ OPS: Dict[str, Tuple[str, Tuple[str, ...]]] = {
     "delete_network_connection": ("network_connections", ("delete_network_connection",)),
     "delete_tag": ("tags", ("delete_tag",)),
     "delete_console_user": ("console_user", ("delete_console_user",)),
+    "create_transaction": ("transactions", ("create_transaction",)),  # fund movement: only sweep*.py use it
+    "create_vault_asset": ("vaults", ("create_vault_account_asset",)),  # adds a wallet/address to a vault
 }
 
 # kwargs each op is called with in this codebase; scripts/probe.py checks they exist on the resolved SDK method
 OP_PARAMS: Dict[str, Tuple[str, ...]] = {
     "list_vaults": ("limit", "after"),
     "get_vault": ("vault_account_id",),
-    "list_transactions": ("after", "before", "limit", "order_by", "sort"),
+    "list_transactions": ("after", "before", "limit", "order_by", "sort", "assets", "status"),
     "list_audit_logs": ("start_time", "end_time", "page_size", "page_cursor", "order"),
     "list_tags": ("page_size",),
     "get_policy_v2": ("policy_type",),
@@ -55,12 +61,22 @@ OP_PARAMS: Dict[str, Tuple[str, ...]] = {
     "delete_network_connection": ("connection_id",),
     "delete_tag": ("tag_id",),
     "delete_console_user": ("id", "force"),
+    "get_transaction": ("tx_id",),
+    "estimate_fee": ("transaction_request",),
+    "create_transaction": ("idempotency_key", "transaction_request"),
+    "get_asset": ("id",),
+    "list_blockchains": ("page_size", "page_cursor"),
+    "create_vault_asset": ("vault_account_id", "asset_id"),
 }
 
 MUTATING_OPS = frozenset({
     "hide_vault", "unhide_vault", "delete_internal_wallet", "delete_external_wallet",
-    "delete_network_connection", "delete_tag", "delete_console_user",
+    "delete_network_connection", "delete_tag", "delete_console_user", "create_transaction",
+    "create_vault_asset",
 })
+
+
+REQUEST_TIMEOUT = 60  # seconds; the SDK has no default, and a dead socket otherwise hangs the process forever
 
 
 class DryRun:
@@ -132,6 +148,15 @@ def to_plain(obj: Any) -> Any:
     return obj
 
 
+def _coerce(kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    """The SDK wants a TransactionRequest model, not a dict; the journal keeps the readable dict."""
+    tr = kwargs.get("transaction_request")
+    if isinstance(tr, dict):
+        from fireblocks.models.transaction_request import TransactionRequest
+        return {**kwargs, "transaction_request": TransactionRequest.from_dict(tr)}
+    return kwargs
+
+
 def public_methods(group_obj: Any) -> list:
     return sorted(n for n in dir(group_obj) if not n.startswith("_") and callable(getattr(group_obj, n, None)))
 
@@ -196,11 +221,12 @@ class FireblocksClient:
             self._journal(op, kwargs, "dry_run")
             return DRY_RUN
         fn = self._resolve(op)
+        sdk_kwargs = dict(_coerce(kwargs), _request_timeout=REQUEST_TIMEOUT)
         attempts = 1 if mutating else 4  # never auto-retry a mutation
         for attempt in range(attempts):
             self._throttle()
             try:
-                result = to_plain(_unwrap(fn(**kwargs)))
+                result = to_plain(_unwrap(fn(**sdk_kwargs)))
                 if mutating:
                     self._journal(op, kwargs, "ok")
                 return result

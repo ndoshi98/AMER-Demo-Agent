@@ -3,7 +3,7 @@
 Cleanup agent for the shared AMER (demo) Fireblocks workspace. It hides empty vaults, proposes TAP consolidation, and
 requests deletion of dormant console users. **Dry run by default. Nothing changes unless you pass `--execute`.**
 
-Status: built and unit-tested offline (120 tests). On the Testnet workspace, `probe.py --online`, dry-run audits, a Tier 1
+Status: built and unit-tested offline (159 tests). On the Testnet workspace, `probe.py --online`, dry-run audits, a Tier 1
 `--execute` (29 vaults hidden) and `--undo-run` (all 29 restored) have been run. A Tier 2
 `--apply-approvals --execute` has deleted one internal wallet on Testnet. Connection, tag and user deletions have not been run. A read-only pull of the AMER (demo) TAP policy has been analyzed (see item 9); nothing in AMER has been changed.
 
@@ -156,6 +156,26 @@ so several people review approvals in a PR. Set `audit_repo.path` (a local clone
 Limits: the check proves the decision exists on `origin/main`, not that a second person made it. Enforce that with
 GitHub branch protection (required reviews, no direct pushes to `main`), which needs a plan that supports it for private
 repos. The operator machine still needs the API key, and `--execute` is still a human choice.
+
+## Fund sweeps (`scripts/sweep.py`, `scripts/sweep_small.py`)
+
+The only code that moves funds. It is separate from the cleanup run and never reachable from `run_cleanup.py`. Both
+scripts are dry run by default, need `--i-understand-this-is-prod` on a production config, and execute only with
+`--execute` plus exactly one of `--limit N` or `--all`. Fund movement goes through `client.call("create_transaction")`
+only. Every transfer re-reads the source vault live right before sending and stops the run on the first failed,
+unconfirmed or approval-gated transfer.
+
+- `sweep.py --asset ETH --amount 0.001 --dest-name <vault>`: moves an exact amount of one asset from vaults whose only
+  balance is that asset.
+- `sweep_small.py --max-usd 10 --dest-name <vault>`: sweeps everything out of vaults whose **total USD value across
+  testnet and mainnet assets** is above $0 and at most the cap. Prices come from recent completed transactions
+  (`amountUSD / amount`). Testnet assets are priced the same way, because the console shows a USD value for them and
+  they are NOT worth $0. An asset with no trustworthy price (stale, implausible or inconsistent) leaves its whole vault
+  alone. Vaults within 10% of the cap are left alone. Per asset, anything that cannot move cleanly (pending, frozen,
+  locked or staked balance, fee not covered, no gas for a token) is skipped and reported. Missing destination wallets
+  are created. `--poll-timeout` sets how long to wait for each transfer (slow chains such as BTC need minutes).
+
+Every SDK call has a 60 second request timeout so a dead connection cannot hang a run.
 
 ## Testnet-first plan
 
