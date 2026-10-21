@@ -158,3 +158,10 @@ def test_random_policies_consolidate_without_changing_behaviour(deny):
             assert truth(plan.rules, tx, default) == truth(rules, tx, default), (seed, tx)
         shrunk += len(plan.rules) < len(rules)
     assert shrunk > 20
+
+
+def test_catch_all_rule_shadows_everything_after_it_and_leaves_no_gaps():
+    catch = rule("catch-all", amount=(0, None))
+    plan = C.consolidate([rule("narrow", assets=("BTC",), signer="B"), catch, rule("later", assets=("ETH",), action="BLOCK"),
+                          rule("later2", addr="WHITELISTED", signer="C")])
+    assert names(plan) == ["narrow", "catch-all"] and plan.gaps == [] and plan.note == ""

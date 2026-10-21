@@ -31,6 +31,8 @@ from fbcleanup.state import State  # noqa: E402
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--config", default=str(ROOT / "config" / "cleanup.yaml"))
+    ap.add_argument("--env-file", default=None, help="credentials file; its values override the environment "
+                    "(default: config/.env, which does not)")
     ap.add_argument("--execute", action="store_true", help="actually mutate the workspace (default: dry run)")
     ap.add_argument("--apply-approvals", action="store_true")
     ap.add_argument("--undo-run", metavar="RUN_ID")
@@ -46,7 +48,10 @@ def main() -> int:
         ap.error("choose one of --apply-approvals / --undo-run")
 
     try:
-        load_env_file(str(ROOT / "config" / ".env"))
+        if args.env_file:
+            load_env_file(args.env_file, override=True)
+        else:
+            load_env_file(str(ROOT / "config" / ".env"))
         cfg = load_config(args.config)
         enforce_prod_gate(cfg, args.i_understand_this_is_prod)
         state_dir = scope_paths(cfg, ROOT)

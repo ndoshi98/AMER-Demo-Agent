@@ -18,3 +18,8 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .mcp.json
+
+# local-only workspace configs (hold real workspace names) and macOS noise
+config/cleanup.amer.yaml
+config/cleanup.testnet-tier2.yaml
+.DS_Store

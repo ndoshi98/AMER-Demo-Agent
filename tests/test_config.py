@@ -26,3 +26,21 @@ def test_two_workspaces_never_share_state_reports_or_approvals():
     for attr in ("state_dir", "reports_dir", "approvals_dir"):
         assert getattr(a, attr) != getattr(b, attr)
         assert getattr(a, attr).endswith("testnet-one") and getattr(b, attr).endswith("amer-demo")
+
+
+def test_env_file_override_replaces_environment_and_requires_both_keys(tmp_path, monkeypatch):
+    import pytest
+    from fbcleanup.config import ConfigError, load_env_file
+    monkeypatch.setenv("FIREBLOCKS_API_KEY", "from-env")
+    monkeypatch.setenv("FIREBLOCKS_SECRET_PATH", "/env/path")
+    f = tmp_path / "e"
+    f.write_text("FIREBLOCKS_API_KEY=from-file\nFIREBLOCKS_SECRET_PATH=/file/path\n")
+    load_env_file(str(f))
+    assert __import__("os").environ["FIREBLOCKS_API_KEY"] == "from-env"
+    load_env_file(str(f), override=True)
+    assert __import__("os").environ["FIREBLOCKS_API_KEY"] == "from-file"
+    f.write_text("FIREBLOCKS_API_KEY=only-key\n")
+    with pytest.raises(ConfigError):
+        load_env_file(str(f), override=True)
+    with pytest.raises(ConfigError):
+        load_env_file(str(tmp_path / "missing"), override=True)

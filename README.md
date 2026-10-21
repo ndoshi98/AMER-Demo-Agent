@@ -3,9 +3,9 @@
 Cleanup agent for the shared AMER (demo) Fireblocks workspace. It hides empty vaults, proposes TAP consolidation, and
 requests deletion of dormant console users. **Dry run by default. Nothing changes unless you pass `--execute`.**
 
-Status: built and unit-tested offline (106 tests). On the Testnet workspace, `probe.py --online`, dry-run audits, a Tier 1
+Status: built and unit-tested offline (108 tests). On the Testnet workspace, `probe.py --online`, dry-run audits, a Tier 1
 `--execute` (29 vaults hidden) and `--undo-run` (all 29 restored) have been run. A Tier 2
-`--apply-approvals --execute` has deleted one internal wallet on Testnet. Connection, tag and user deletions have not been run. The AMER (demo) workspace has not been touched.
+`--apply-approvals --execute` has deleted one internal wallet on Testnet. Connection, tag and user deletions have not been run. A read-only pull of the AMER (demo) TAP policy has been analyzed (see item 9); nothing in AMER has been changed.
 
 ## Workspaces
 
@@ -79,6 +79,9 @@ them.
 
 Edit `config/cleanup.yaml` for Testnet. Unknown keys are rejected. For AMER, copy it to a separate config file, set
 `expected_name` and `is_production: true`, and pass it with `--config`. `expected_name` is required. See Workspaces.
+Keep AMER credentials in a separate file (e.g. `config/.env.amer`, gitignored, mode 600) and pass `--env-file`. Unlike the
+default `config/.env`, `--env-file` overrides `FIREBLOCKS_API_KEY` / `FIREBLOCKS_SECRET_PATH` already in your shell, so the
+Testnet key can't be used by accident. Local AMER/test configs are gitignored.
 
 ## Usage
 
@@ -159,15 +162,16 @@ Steps 1 to 5 run only against the Testnet workspace. Step 6 is the only step tha
 7. **Tier 1 tag add/remove is not implemented.** `create_tag` and vault renames beyond duplicate-name suggestions
    are also missing. The tag-based protection only works if people tag vaults by hand.
 8. **Tag usage** is derived from vault tags only. Contact-tag usage is not checked.
-9. **Policy analysis coverage.** Consolidation models only v2 rules with `INCLUDES` blocks, USD amount ranges and no
-    `amountOverTime`; anything else is opaque. Named asset/source/destination values are assumed able to overlap, which
-    blocks some merges. Amount bounds are assumed inclusive. It gives up beyond 10 distinct value groups in one
-    dimension. Verified on the 4-rule testnet policy and on random policies against a brute-force check, not yet on
-    AMER's real policies. Only the v2 `TRANSFER` type is collected. The v2 adapter parses the one live testnet
-    policy (3 simple rules) but is otherwise untested on real policies, and the legacy adapter is unvalidated
-    (the legacy endpoint 500s here). v2 dimensions are equality-only, so MERGEABLE and shadow findings are
-    under-reported. Legacy amount semantics are not modelled. Union-of-rules shadowing is not detected. Rules the
-    analyzer can't model are treated as opaque and never dropped.
+9. **Policy analysis coverage.** Consolidation models v2 `TRANSFER` rules: `INCLUDES` blocks, source/destination
+    `type`/`subType`/`ids`, initiator users and groups, asset lists, USD and NATIVE amount ranges, `index` and
+    `v1RuleId`. Anything else (EXCLUDES, `amountOverTime`, unknown keys, legacy shape) is opaque and acts as a barrier.
+    Assumptions: amount bounds are inclusive; named asset and initiator-group values may overlap (this blocks some
+    merges); unmatched transactions are blocked (only the default-deny proposal uses this, and it is unverified); a USD
+    range is assumed to match every asset, though the engine may not be able to price testnet assets. It gives up beyond
+    10 distinct value groups in one dimension or 400k verification nodes. Only the v2 `TRANSFER` type is collected, and
+    rule order from the API is assumed to be evaluation order. Fuzz-tested against a brute-force check. On the AMER
+    policy (2026-10-21) all 26 rules parse and a catch-all at position 7 makes 20 later rules unreachable (see
+    `--env-file` below). Union-of-rules shadowing in `tap.py` is not detected.
 10. **Dry-run audits advance the quarantine ledger.** Use `--no-observe` for previews. The 14-day span limits damage
     from rapid reruns. `--apply-approvals` relies on the ledger from the last audit plus a fresh re-classification.
 

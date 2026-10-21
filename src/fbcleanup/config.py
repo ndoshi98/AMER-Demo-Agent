@@ -141,17 +141,28 @@ def load_config(path: str) -> Config:
         return parse_config(yaml.safe_load(fh))
 
 
-def load_env_file(path: str) -> None:
-    """Minimal KEY=VALUE loader. Never overrides variables already set in the environment."""
+def load_env_file(path: str, override: bool = False) -> None:
+    """Minimal KEY=VALUE loader. Overrides variables already set in the environment only when override=True."""
     p = Path(path)
     if not p.exists():
+        if override:
+            raise ConfigError(f"--env-file {p} does not exist")
         return
+    seen = set()
     for line in p.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
         k, v = line.split("=", 1)
-        os.environ.setdefault(k.strip(), v.strip().strip("'\""))
+        seen.add(k.strip())
+        val = v.strip().strip("'\"")
+        if override:
+            os.environ[k.strip()] = val
+        else:
+            os.environ.setdefault(k.strip(), val)
+    missing = {"FIREBLOCKS_API_KEY", "FIREBLOCKS_SECRET_PATH"} - seen
+    if override and missing:
+        raise ConfigError(f"--env-file {p} must define {sorted(missing)} so a key from the environment is never mixed in")
 
 
 def load_credentials() -> Tuple[str, str]:
