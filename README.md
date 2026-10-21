@@ -123,9 +123,10 @@ Steps 1 to 5 run only against the Testnet workspace. Step 6 is the only step tha
   Fixed in `collect_audit` and covered by `tests/test_collect.py`. A 365-day window works (2,730 events, 7 users).
 - **Audit has a real login event** (`Administration` / `Signed in`), plus `Access denied`. `audit.activity_events` is
   left empty, so any audit event counts as activity. That is the conservative choice (fewer users flagged).
-- **Hidden vaults are excluded from the vault listing.** 0 of 60 listed vaults are hidden even though the audit log
-  shows 19 `Archived` events in 30 days. So "already hidden" detection can't work from the listing, and vault-tag
-  usage counts ignore hidden vaults. Unhide by id still works.
+- **Hidden vaults are included in the vault listing, flagged `hiddenOnUI: true`.** Confirmed on 2026-10-21: after
+  `--execute` hid 29 vaults, a fresh listing returned all of them with `hiddenOnUI: true`, and `--undo-run` took the
+  count back to 0. "Already hidden" detection therefore works, and hidden vaults still count toward tag usage. The first
+  probe saw 0 hidden vaults of 60. The 19 `Archived` audit events in that window are unexplained.
 - **v2 policy shape** (`{policy: {rules: [...]}, validation}`) parses cleanly: 3 rules, none opaque.
 - **TAP signers can be API users**, not only console users. `list_api_users` is now collected and merged with console
   users for the dead-reference check (skipped entirely if either list fails to load), which removed a false
