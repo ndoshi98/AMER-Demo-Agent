@@ -15,8 +15,11 @@ Built and verified against a **testnet** workspace first. The report is the prod
    → Settings > Quorums. `USER_REFERENCED_IN_TAP` → clean the TAP reference first. `USER_PENDING_ONBOARDING` →
    revoke the invite in the console. Completion = a later poll shows `enabled: false`. `force` is an explicit
    CLI flag (`--force-user-delete`), default off, **never suggested in error text**.
-5. **Never publish policy.** No policy write op exists in `OPS`; do not add one, and do not add a flag for it.
-   `PUT/POST /policy/draft` clobbers a shared draft a teammate may have open. A human publishes.
+5. **Never publish policy.** `OPS` has no publish op; do not add one, and do not add a flag for it. A human publishes.
+   The single exception, authorised by the owner for the AMER TAP rework: `update_policy_draft` (SDK `update_draft`)
+   may overwrite the policy DRAFT, only from `scripts/write_tap_draft.py`, dry-run by default, behind the prod gate,
+   and only when the current draft is empty, identical to the active policy, or already this proposal
+   (`tap_draft.precheck`). A write clobbers a shared draft a teammate may have open, so never loosen that pre-check.
 
 ## Principles
 

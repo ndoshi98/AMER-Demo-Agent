@@ -10,12 +10,14 @@ Fund movement goes only through client.call("create_transaction"); see sweep.py 
 from __future__ import annotations
 
 import hashlib
+import re
 import time
 from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any, Callable, Dict, List, Optional
 
 from .client import DRY_RUN, ApiError
+from .rules import _protected, vault_balances_zero
 from .sweep import Outcome, _dec, build_request, estimated_fee, send_and_wait
 
 
@@ -25,6 +27,7 @@ class AssetInfo:
     testnet: bool
     native: bool
     gas_asset: str
+    deprecated: bool = False
 
 
 @dataclass
@@ -69,7 +72,8 @@ def asset_info(client, blockchains: Dict[str, Dict[str, Any]], asset_id: str) ->
     test = ((b or {}).get("onchain") or {}).get("test")
     if b is None or not isinstance(test, bool):
         return None
-    return AssetInfo(asset_id, test, a.get("id") == b.get("nativeAssetId"), b.get("legacyId") or "")
+    dep = ((a.get("metadata") or {}).get("deprecated")) is True
+    return AssetInfo(asset_id, test, a.get("id") == b.get("nativeAssetId"), b.get("legacyId") or "", deprecated=dep)
 
 
 PRICE_FLOOR = Decimal("1e-9")
@@ -112,7 +116,7 @@ def _clean(a: Dict[str, Any]) -> Optional[str]:
 
 def plan_vaults(vaults: List[Dict[str, Any]], dest_id: str, infos: Dict[str, Optional[AssetInfo]],
                 prices: Dict[str, Optional[Decimal]], max_usd: Decimal,
-                margin: Decimal = Decimal("0.10")) -> List[VaultPlan]:
+                margin: Decimal = Decimal("0.10"), holds: Optional[Dict[str, str]] = None) -> List[VaultPlan]:
     plans: List[VaultPlan] = []
     for v in sorted(vaults, key=lambda v: int(v["id"]) if str(v["id"]).isdigit() else 0):
         if str(v["id"]) == str(dest_id):
@@ -121,12 +125,19 @@ def plan_vaults(vaults: List[Dict[str, Any]], dest_id: str, infos: Dict[str, Opt
         if not held:
             continue
         p = VaultPlan(v)
+        if holds and str(v["id"]) in holds:
+            p.excluded = holds[str(v["id"])]
+            plans.append(p)
+            continue
         for a in held:
             aid, total = a["id"], _dec(a.get("total"))
             info = infos.get(aid)
             if total.is_nan() or info is None:
                 p.excluded = f"cannot classify {aid}"
                 break
+            if prices.get(aid) is None and info.testnet and info.deprecated:
+                p.items.append(Item(aid, total, Decimal(0), "deprecated testnet asset with no price: left in the vault"))
+                continue
             if prices.get(aid) is None:
                 p.excluded = f"no USD price for {'testnet' if info.testnet else 'mainnet'} asset {aid}"
                 break
@@ -228,4 +239,84 @@ def run_value_sweep(client, plans: List[VaultPlan], infos: Dict[str, Optional[As
             sent += o.status == "completed"
             if not o.ok and o.status != "skipped":
                 return outcomes
+    return outcomes
+
+
+CANTON_NAME = re.compile(r"canton|dtcc", re.IGNORECASE)
+
+
+def hold_reason(vault: Dict[str, Any], infos: Dict[str, Optional[AssetInfo]], protect, policy_refs: set) -> str:
+    """Why this vault must never be swept or hidden ("" if nothing holds it back). Canton includes zero-balance wallets."""
+    vid, name = str(vault["id"]), vault.get("name") or ""
+    if CANTON_NAME.search(name):
+        return "Canton/DTCC vault (by name)"
+    for a in vault.get("assets") or []:
+        info = infos.get(a.get("id"))
+        if "CANTON" in str(a.get("id")).upper() or (info is not None and "CANTON" in info.gas_asset.upper()):
+            return f"Canton asset {a.get('id')}"
+    labels = [t.get("label", "") for t in vault.get("tags") or []]
+    why = _protected(name, vid, protect, vault.get("customerRefId") or "", labels)
+    if why:
+        return "protected: " + "; ".join(why)
+    if f"vault:{vid}" in policy_refs:
+        return "referenced by a TAP rule"
+    return ""
+
+
+def remaining_usd(vault: Dict[str, Any], infos: Dict[str, Optional[AssetInfo]],
+                  prices: Dict[str, Optional[Decimal]]) -> "tuple[Optional[Decimal], str]":
+    """(USD value of what the vault holds now, "") or (None, why it cannot be valued)."""
+    total = Decimal(0)
+    for a in vault.get("assets") or []:
+        amt = _dec(a.get("total"))
+        if amt.is_nan():
+            return None, f"unreadable balance for {a.get('id')}"
+        if amt == 0:
+            continue
+        info = infos.get(a["id"])
+        if info is not None and prices.get(a["id"]) is None and info.testnet and info.deprecated:
+            continue
+        if info is None or prices.get(a["id"]) is None:
+            return None, f"no USD price for {a['id']}"
+        total += amt * prices[a["id"]]
+    return total, ""
+
+
+def run_hide(client, vaults: List[Dict[str, Any]], infos: Dict[str, Optional[AssetInfo]],
+             prices: Dict[str, Optional[Decimal]], max_usd: Decimal, *, limit: Optional[int] = None,
+             on_outcome: Callable[[Outcome], None] = lambda o: None) -> List[Outcome]:
+    """Hide each vault after a live re-read: still worth at most max_usd, fully priced, not already hidden.
+    Skips do not stop the run; an API error does. `limit` caps vaults actually hidden."""
+    outcomes: List[Outcome] = []
+    hidden = 0
+    for v in vaults:
+        if limit is not None and hidden >= limit:
+            break
+        vid, name = str(v["id"]), v.get("name", "")
+        try:
+            live = client.call("get_vault", vault_account_id=vid)
+            if not isinstance(live, dict):
+                o = Outcome(vid, name, "skipped", "could not re-read the vault")
+            elif live.get("hiddenOnUI"):
+                o = Outcome(vid, name, "skipped", "already hidden")
+            else:
+                usd, why = remaining_usd(live, infos, prices)
+                if usd is None:
+                    o = Outcome(vid, name, "skipped", why)
+                elif usd > max_usd:
+                    o = Outcome(vid, name, "skipped", f"now worth ${usd:,.2f}, over the cap")
+                else:
+                    left = f"${usd:,.2f} left" if usd or not vault_balances_zero(live)[0] else "empty"
+                    res = client.call("hide_vault", vault_account_id=vid)
+                    if res is DRY_RUN:
+                        o = Outcome(vid, name, "dry-run", f"would hide ({left})")
+                    else:
+                        hidden += 1
+                        o = Outcome(vid, name, "hidden", f"hidden ({left}); tx history is hidden in the console too")
+        except ApiError as exc:
+            o = Outcome(vid, name, "failed", f"API error: {exc}".splitlines()[0])
+        outcomes.append(o)
+        on_outcome(o)
+        if o.status == "failed":
+            break
     return outcomes

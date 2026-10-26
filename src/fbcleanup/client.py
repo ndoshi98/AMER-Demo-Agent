@@ -28,12 +28,16 @@ OPS: Dict[str, Tuple[str, Tuple[str, ...]]] = {
     "list_network_connections": ("network_connections", ("get_network_connections",)),
     "list_tags": ("tags", ("get_tags",)),
     "list_api_users": ("api_user", ("get_api_users",)),
+    "list_user_groups": ("user_groups_beta", ("get_user_groups",)),
     "get_transaction": ("transactions", ("get_transaction",)),
     "estimate_fee": ("transactions", ("estimate_transaction_fee",)),
     "get_asset": ("blockchains_assets", ("get_asset",)),
     "list_blockchains": ("blockchains_assets", ("list_blockchains",)),
     "get_policy_legacy": ("policy_editor_beta", ("get_active_policy_legacy",)),
     "get_policy_v2": ("policy_editor_v2", ("get_active_policy",)),
+    "get_policy_draft": ("policy_editor_v2", ("get_draft",)),
+    "get_gas_station": ("gas_stations", ("get_gas_station_info",)),
+    "get_gas_station_asset": ("gas_stations", ("get_gas_station_by_asset_id",)),
     # --- mutations (must also be listed in MUTATING_OPS) ---
     "hide_vault": ("vaults", ("hide_vault_account",)),
     "unhide_vault": ("vaults", ("unhide_vault_account",)),
@@ -44,6 +48,8 @@ OPS: Dict[str, Tuple[str, Tuple[str, ...]]] = {
     "delete_console_user": ("console_user", ("delete_console_user",)),
     "create_transaction": ("transactions", ("create_transaction",)),  # fund movement: only sweep*.py use it
     "create_vault_asset": ("vaults", ("create_vault_account_asset",)),  # adds a wallet/address to a vault
+    # overwrites the policy DRAFT only; nothing here publishes (CLAUDE.md constraint 5). Only write_tap_draft.py uses it.
+    "update_policy_draft": ("policy_editor_v2", ("update_draft",)),
 }
 
 # kwargs each op is called with in this codebase; scripts/probe.py checks they exist on the resolved SDK method
@@ -54,6 +60,9 @@ OP_PARAMS: Dict[str, Tuple[str, ...]] = {
     "list_audit_logs": ("start_time", "end_time", "page_size", "page_cursor", "order"),
     "list_tags": ("page_size",),
     "get_policy_v2": ("policy_type",),
+    "get_policy_draft": ("policy_type",),
+    "get_gas_station_asset": ("asset_id",),
+    "update_policy_draft": ("update_draft_request", "idempotency_key"),
     "hide_vault": ("vault_account_id",),
     "unhide_vault": ("vault_account_id",),
     "delete_internal_wallet": ("wallet_id",),
@@ -72,7 +81,7 @@ OP_PARAMS: Dict[str, Tuple[str, ...]] = {
 MUTATING_OPS = frozenset({
     "hide_vault", "unhide_vault", "delete_internal_wallet", "delete_external_wallet",
     "delete_network_connection", "delete_tag", "delete_console_user", "create_transaction",
-    "create_vault_asset",
+    "create_vault_asset", "update_policy_draft",
 })
 
 
@@ -148,12 +157,32 @@ def to_plain(obj: Any) -> Any:
     return obj
 
 
+class _RawRule:
+    """Carries a rule dict through the SDK's serializer untouched. PolicyRule.from_dict rejects assetTypes ['*']
+    (a oneOf bug in the generated models), so the draft is built without model validation."""
+    def __init__(self, data: Dict[str, Any]):
+        self._data = data
+
+    def __bool__(self) -> bool:
+        return True
+
+    def to_dict(self) -> Dict[str, Any]:
+        return self._data
+
+
 def _coerce(kwargs: Dict[str, Any]) -> Dict[str, Any]:
-    """The SDK wants a TransactionRequest model, not a dict; the journal keeps the readable dict."""
+    """The SDK wants model objects, not dicts; the journal keeps the readable dict."""
     tr = kwargs.get("transaction_request")
     if isinstance(tr, dict):
         from fireblocks.models.transaction_request import TransactionRequest
         return {**kwargs, "transaction_request": TransactionRequest.from_dict(tr)}
+    ud = kwargs.get("update_draft_request")
+    if isinstance(ud, dict):
+        from fireblocks.models.policy_type import PolicyType
+        from fireblocks.models.update_draft_request import UpdateDraftRequest
+        req = UpdateDraftRequest.model_construct(policy_types=[PolicyType(t) for t in ud["policyTypes"]],
+                                                 rules=[_RawRule(r) for r in ud["rules"]])
+        return {**kwargs, "update_draft_request": req}
     return kwargs
 
 

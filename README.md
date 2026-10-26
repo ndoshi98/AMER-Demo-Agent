@@ -3,9 +3,12 @@
 Cleanup agent for the shared AMER (demo) Fireblocks workspace. It hides empty vaults, proposes TAP consolidation, and
 requests deletion of dormant console users. **Dry run by default. Nothing changes unless you pass `--execute`.**
 
-Status: built and unit-tested offline (159 tests). On the Testnet workspace, `probe.py --online`, dry-run audits, a Tier 1
+Status: built and unit-tested offline (181 tests). On the Testnet workspace, `probe.py --online`, dry-run audits, a Tier 1
 `--execute` (29 vaults hidden) and `--undo-run` (all 29 restored) have been run. A Tier 2
-`--apply-approvals --execute` has deleted one internal wallet on Testnet. Connection, tag and user deletions have not been run. A read-only pull of the AMER (demo) TAP policy has been analyzed (see item 9); nothing in AMER has been changed.
+`--apply-approvals --execute` has deleted one internal wallet on Testnet. Connection, tag and user deletions have not been run. In the AMER (demo) workspace a full TAP naming-and-consolidation pass has been completed across all 14 policy
+types, taking the workspace from 60 to 47 rules: the agent wrote each proposal into the policy **draft** and a
+human reviewed and published it in the console. One supervised `sweep_small.py --execute --limit 1` transfer has
+run; the `--hide` step is still untested.
 
 ## Workspaces
 
@@ -34,7 +37,7 @@ Exactly two workspaces are in scope. The agent is never pointed at any other.
 |---|---|---|
 | 1 | Hide / unhide empty vaults | Automatic with `--execute`, after quarantine. Reversible (`--undo-run`). |
 | 2 | Delete external/internal wallets, network connections, tags; request console-user deletion | YAML approval file, `approved: true`, applied in a **later** run with `--apply-approvals --execute` |
-| 3 | TAP consolidation, vault renames | Propose only. A human publishes the policy. |
+| 3 | TAP consolidation, vault renames | Propose only. A human publishes the policy. The one exception is `write_tap_draft.py` (see below), which writes a DRAFT on request. |
 
 TAP consolidation (`tap_consolidate.py`) removes duplicate and unreachable rules and merges rules that differ in one
 dimension (asset, source, destination or amount range). Every step is verified: the original and proposed rule lists
@@ -174,6 +177,30 @@ unconfirmed or approval-gated transfer.
   alone. Vaults within 10% of the cap are left alone. Per asset, anything that cannot move cleanly (pending, frozen,
   locked or staked balance, fee not covered, no gas for a token) is skipped and reported. Missing destination wallets
   are created. `--poll-timeout` sets how long to wait for each transfer (slow chains such as BTC need minutes).
+  An unpriced deprecated testnet asset counts as $0 and stays in the vault.
+  `--hide` (with `--include-empty` for already-empty vaults) hides each swept vault afterwards if it is still worth at
+  most the cap. It never hides Canton-relevant vaults, `vault_protect` vaults or vaults referenced by the TAP, and
+  never hides anything if the sweep stopped early. Reversible with `run_cleanup.py --undo-run <run-id>`.
+
+## TAP rule naming
+
+[`docs/tap-naming-convention.md`](docs/tap-naming-convention.md) — the `[Scope] Subject (qualifier)`
+convention used across every policy type, why `tap_consolidate` must run before any naming pass, and the
+failure modes it surfaces (dead rules hidden under a misplaced catch-all; names that contradict their
+configuration).
+
+## TAP draft write (`scripts/write_tap_draft.py`)
+
+Writes a proposed rule list for one policy type (`--policy-type`, default `TRANSFER`) into the policy **draft**.
+JSON in, `_`-prefixed annotation keys stripped. It never
+publishes: a human reviews the draft in the console and publishes there. Dry run by default; `--execute` writes. It
+refuses unless the current draft is empty, identical to the active policy, or already holds this same proposal
+(writing replaces the whole draft, so anything else may be a teammate's unpublished work). It checks
+`workspace.expected_name`, needs `--i-understand-this-is-prod`, journals the write, reads the draft back, compares the
+rules and prints the server's validation result. Drafts are scoped per policy type, so several types can be
+drafted before any is published. While a console session has the policy editor open the whole policy API is
+locked and even reads return `409 DRAFT_EDIT_ERROR_LOCKED_BY_DIFFERENT_USER`; close the editor first. Every rule needs an `id` and `designatedSigners` must not carry an
+empty `users` array, or the server marks the draft `INVALID_CONFIGURATION`.
 
 Every SDK call has a 60 second request timeout so a dead connection cannot hang a run.
 

@@ -234,3 +234,82 @@ def test_idempotency_key_is_deterministic_and_within_the_api_limit():
     k = V._idem_key("sweep-20261021T193902Z", "123456", "AMOY_POLYGON_TEST")
     assert len(k) <= 40 and k == V._idem_key("sweep-20261021T193902Z", "123456", "AMOY_POLYGON_TEST")
     assert k != V._idem_key("sweep-20261021T193902Z", "123456", "ETH_TEST5")
+
+
+# --- holds and hiding -----------------------------------------------------------------------------
+from fbcleanup.config import Protect  # noqa: E402
+
+
+def _protect(**kw):
+    return Protect(**{"ids": [], "name_patterns": [], "customer_ref_id_prefixes": [], "tag_labels": ["keep-for-demo"], **kw})
+
+
+CINFOS = dict(INFOS, CANTON=info("CANTON", False, True, "CANTON"), CT=info("CT", True, False, "CANTON_TEST"))
+
+
+@pytest.mark.parametrize("v,expect", [
+    (vault(1, "DTCC Demo", asset("ETH", "0")), "Canton/DTCC"),
+    (vault(2, "plain", asset("CANTON", "0")), "Canton asset"),
+    (vault(3, "plain", asset("CT", "0")), "Canton asset"),
+    (dict(vault(4, "plain", asset("ETH", "1")), tags=[{"label": "Keep-For-Demo"}]), "protected"),
+    (vault(5, "in policy", asset("ETH", "1")), "TAP"),
+    (vault(6, "plain", asset("ETH", "1")), ""),
+])
+def test_hold_reasons(v, expect):
+    why = V.hold_reason(v, CINFOS, _protect(), {"vault:5"})
+    assert (expect in why) if expect else why == ""
+
+
+def test_held_vault_is_excluded_from_the_sweep_plan():
+    vs = [vault(1, "DTCC Demo", asset("ETH", "0.001")), vault(2, "ok", asset("ETH", "0.001"))]
+    out = {p.vault["id"]: p for p in V.plan_vaults(vs, "386", INFOS, PRICES, D(10), holds={"1": "Canton/DTCC vault"})}
+    assert out["1"].excluded == "Canton/DTCC vault" and out["1"].items == [] and not out["2"].excluded
+
+
+def hide_run(make_client, vs, live=None, **kw):
+    r = {("vaults", "get_vault_account"): lambda vault_account_id: next(v for v in (live or vs) if v["id"] == vault_account_id),
+         ("vaults", "hide_vault_account"): lambda **k: {}}
+    cl, sdk = make_client(r, dry_run=kw.pop("dry_run", False))
+    return V.run_hide(cl, vs, INFOS, PRICES, D(25), **kw), sdk
+
+
+def test_hide_empty_and_dusty_vaults_but_not_over_cap_unpriced_or_already_hidden(make_client):
+    vs = [vault(1, "empty", asset("ETH", "0")), vault(2, "dust", asset("ETH", "0.000001")),
+          vault(3, "big", asset("ETH", "0.1")), vault(4, "unpriced", asset("UNK", "1")),
+          dict(vault(5, "gone", asset("ETH", "0")), hiddenOnUI=True)]
+    outs, sdk = hide_run(make_client, vs)
+    assert [o.status for o in outs] == ["hidden", "hidden", "skipped", "skipped", "skipped"]
+    assert [c[2]["vault_account_id"] for c in sdk.calls("hide_vault_account")] == ["1", "2"]
+
+
+def test_hide_is_a_dry_run_by_default_and_respects_limit(make_client):
+    vs = [vault(i, f"v{i}", asset("ETH", "0")) for i in (1, 2, 3)]
+    outs, sdk = hide_run(make_client, vs, dry_run=True)
+    assert [o.status for o in outs] == ["dry-run"] * 3 and sdk.calls("hide_vault_account") == []
+    outs, sdk = hide_run(make_client, vs, limit=2)
+    assert len(sdk.calls("hide_vault_account")) == 2
+
+
+DEP = dict(INFOS, DEPR=V.AssetInfo("DEPR", True, True, "DEPR", deprecated=True),
+           DEPRMAIN=V.AssetInfo("DEPRMAIN", False, True, "DEPRMAIN", deprecated=True),
+           OLDT=V.AssetInfo("OLDT", True, True, "OLDT"))
+DEP_PRICES = dict(PRICES, DEPR=None, DEPRMAIN=None, OLDT=None)
+
+
+def test_unpriced_deprecated_testnet_asset_counts_as_zero_and_stays_in_the_vault():
+    ps = {p.vault["id"]: p for p in V.plan_vaults(
+        [vault(1, "a", asset("DEPR", "5"), asset("USDC", "2")), vault(2, "b", asset("DEPR", "5"), asset("USDC", "30")),
+         vault(3, "c", asset("DEPRMAIN", "5")), vault(4, "d", asset("OLDT", "5"))], "386", DEP, DEP_PRICES, D(25))}
+    assert not ps["1"].excluded and ps["1"].usd == D(2)
+    assert {i.asset: bool(i.skip) for i in ps["1"].items} == {"DEPR": True, "USDC": False}
+    assert ps["2"].excluded.startswith("over cap")
+    assert "no USD price" in ps["3"].excluded and "no USD price" in ps["4"].excluded
+
+
+def test_hide_values_deprecated_testnet_as_zero_but_not_other_unpriced(make_client):
+    r = {("vaults", "hide_vault_account"): {}}
+    vs = [vault(1, "a", asset("DEPR", "5")), vault(2, "b", asset("DEPRMAIN", "5")), vault(3, "c", asset("OLDT", "5"))]
+    r[("vaults", "get_vault_account")] = lambda **kw: next(v for v in vs if v["id"] == kw["vault_account_id"])
+    cl, sdk = make_client(r, dry_run=False)
+    outs = V.run_hide(cl, vs, DEP, DEP_PRICES, D(25))
+    assert [o.status for o in outs] == ["hidden", "skipped", "skipped"]

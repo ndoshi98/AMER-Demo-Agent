@@ -23,7 +23,7 @@ from fbcleanup import client as C  # noqa: E402
 from fbcleanup.collect import audit_event_names, collect_audit  # noqa: E402
 from fbcleanup.config import ConfigError, enforce_prod_gate, load_config, load_credentials, load_env_file  # noqa: E402
 
-FORBIDDEN_FRAGMENTS = ("draft", "publish", "update_policy", "set_policy")
+FORBIDDEN_FRAGMENTS = ("publish", "set_policy")  # the draft may be written (update_draft); publishing never
 
 
 def offline() -> int:

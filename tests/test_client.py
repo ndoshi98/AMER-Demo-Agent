@@ -28,11 +28,29 @@ def test_unknown_op_is_refused(make_client):
         cl.call("publish_policy_draft")
 
 
-def test_no_policy_write_op_exists():
+def test_policy_ops_can_write_the_draft_but_never_publish():
     for op, (_, cands) in C.OPS.items():
-        assert not any(frag in name for name in cands for frag in ("draft", "publish", "update_policy")), op
-        if "policy" in op:
+        assert "publish" not in op and not any("publish" in name for name in cands), op
+        if "policy" in op and op != "update_policy_draft":
             assert op not in C.MUTATING_OPS
+    assert C.OPS["update_policy_draft"][1] == ("update_draft",) and "update_policy_draft" in C.MUTATING_OPS
+    assert C.OPS["get_policy_draft"][1] == ("get_draft",) and "get_policy_draft" not in C.MUTATING_OPS
+
+
+def test_draft_request_keeps_star_asset_types_through_the_sdk_serializer():
+    from fireblocks.api_client import ApiClient
+    from fireblocks.configuration import Configuration
+    rules = [{"name": "r", "asset": {"operator": "INCLUDES", "assetTypes": ["*"], "nftTransfer": False}}]
+    req = C._coerce({"update_draft_request": {"policyTypes": ["TRANSFER"], "rules": rules}})["update_draft_request"]
+    body = ApiClient(Configuration()).sanitize_for_serialization(req)
+    assert body == {"policyTypes": ["TRANSFER"], "rules": rules}
+
+
+def test_draft_write_is_suppressed_in_dry_run(make_client):
+    cl, sdk = make_client({("policy_editor_v2", "update_draft"): {}})
+    assert cl.call("update_policy_draft", update_draft_request={"policyTypes": ["TRANSFER"], "rules": []},
+                   idempotency_key="k") is C.DRY_RUN
+    assert not sdk.calls("update_draft")
 
 
 def test_every_mutating_op_is_in_ops_and_vice_versa_reads_are_not_mutating():

@@ -32,7 +32,7 @@ class _Group:
 
 class FakeSDK:
     GROUPS = ("vaults", "console_user", "external_wallets", "internal_wallets", "network_connections", "tags",
-              "workspace", "transactions", "users", "audit_logs", "policy_editor_v2", "policy_editor_beta", "api_user", "blockchains_assets")
+              "workspace", "transactions", "users", "audit_logs", "policy_editor_v2", "policy_editor_beta", "api_user", "blockchains_assets", "user_groups_beta")
 
     def __init__(self, responses=None):
         self.log = []
