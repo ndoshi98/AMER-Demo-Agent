@@ -56,3 +56,6 @@ paths:
 
 # audit_repo:   # optional locally; REQUIRED for production configs (see README: Shared review)
 #   path: ~/AMER-Demo-Agent-auditlogs_and_approvals
+
+pricing:
+  overrides: {}            # asset id -> USD per unit, e.g. {SOME_CUSTOM_TOKEN: 0}; beats every other price (see README)

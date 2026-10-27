@@ -48,6 +48,7 @@ OPS: Dict[str, Tuple[str, Tuple[str, ...]]] = {
     "delete_console_user": ("console_user", ("delete_console_user",)),
     "create_transaction": ("transactions", ("create_transaction",)),  # fund movement: only sweep*.py use it
     "create_vault_asset": ("vaults", ("create_vault_account_asset",)),  # adds a wallet/address to a vault
+    "unfreeze_transaction": ("transactions", ("unfreeze_transaction",)),  # releases one frozen (AML) transaction; never freezes
     # overwrites the policy DRAFT only; nothing here publishes (CLAUDE.md constraint 5). Only write_tap_draft.py uses it.
     "update_policy_draft": ("policy_editor_v2", ("update_draft",)),
 }
@@ -76,12 +77,13 @@ OP_PARAMS: Dict[str, Tuple[str, ...]] = {
     "get_asset": ("id",),
     "list_blockchains": ("page_size", "page_cursor"),
     "create_vault_asset": ("vault_account_id", "asset_id"),
+    "unfreeze_transaction": ("tx_id", "idempotency_key"),
 }
 
 MUTATING_OPS = frozenset({
     "hide_vault", "unhide_vault", "delete_internal_wallet", "delete_external_wallet",
     "delete_network_connection", "delete_tag", "delete_console_user", "create_transaction",
-    "create_vault_asset", "update_policy_draft",
+    "create_vault_asset", "update_policy_draft", "unfreeze_transaction",
 })
 
 

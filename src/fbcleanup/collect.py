@@ -161,6 +161,34 @@ def collect_policy(client) -> Tuple[Optional[Dict[str, Any]], str]:
     raise RuntimeError(f"policy unavailable ({last_err})")
 
 
+POLICY_TYPES = ("TRANSFER", "APPROVE", "CONTRACT_CALL", "DAPP_CONNECTION", "TYPED_MESSAGE", "MINT", "PROGRAM_CALL", "ORDER",
+                "DEPLOYMENT", "UPGRADE", "BURN", "STAKE", "AML_CHAINALYSIS_V2_SCREENING",
+                "AML_CHAINALYSIS_V2_POST_SCREENING")
+
+
+def collect_vault_refs(client) -> Set[str]:
+    """Every "vault:<id>" referenced by an ACTIVE rule of ANY policy type. Read-only.
+
+    collect_policy() reads TRANSFER only, which misses vaults referenced by e.g. the AML, MINT/BURN and APPROVE rules.
+    Raises RuntimeError if any type cannot be read: callers use this to decide what must not be touched, so a partial
+    answer must never pass for a complete one."""
+    from . import tap, tap_draft   # local import: keeps collect importable without the policy modules
+    refs: Set[str] = set()
+    for ptype in POLICY_TYPES:
+        try:
+            resp = client.call("get_policy_v2", policy_type=ptype)
+        except Exception as exc:  # noqa: BLE001
+            raise RuntimeError(f"cannot read the {ptype} policy ({exc})") from exc
+        rules = tap_draft.active_rules(resp)
+        if rules is None:
+            raise RuntimeError(f"unexpected {ptype} policy response; refusing to guess which vaults are referenced")
+        for rule in rules:
+            found: Set[str] = set()
+            tap._collect_refs(rule, found)
+            refs |= {r for r in found if r.startswith("vault:")}
+    return refs
+
+
 def collect_all(client, now: int, cfg) -> Inventory:
     """Run every collector; failures are recorded per type, never raised."""
     inv = Inventory(now=now)

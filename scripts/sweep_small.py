@@ -7,8 +7,9 @@ DRY RUN by default: prints the plan (what would move, what is skipped and why); 
   sweep_small.py ... --execute --limit 1                                   send ONE transfer (the test)
   sweep_small.py ... --execute --all                                       send everything in the plan
 
-A vault qualifies when it holds something and its USD total is <= --max-usd. Testnet assets count as $0; a mainnet
-asset with no USD price makes its vault unvaluable and it is left alone. Missing destination wallets are created.
+A vault qualifies when it holds something and its USD total is <= --max-usd. Testnet assets are priced like mainnet
+ones (the console reports USD on testnet transactions); an asset with no trustworthy USD price makes its vault unvaluable and it
+is left alone. Missing destination wallets are created.
 Per-asset problems are skipped and reported; the run stops on a failed, unconfirmed or approval-pending transfer.
 Production needs --i-understand-this-is-prod. Transfers are irreversible.
 """
@@ -24,7 +25,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
-from fbcleanup import collect, rules, sweep, sweep_value as sv, tap  # noqa: E402
+from fbcleanup import collect, rules, sweep, sweep_value as sv  # noqa: E402
 from fbcleanup.client import ApiError, FireblocksClient  # noqa: E402
 from fbcleanup.config import (ConfigError, enforce_prod_gate, load_config, load_credentials, load_env_file,  # noqa: E402
                               scope_paths)
@@ -104,10 +105,9 @@ def main() -> int:
         prices = {a: sv.usd_price(client, a) for a in held if infos[a] is not None}
 
         try:
-            policy, _ = collect.collect_policy(client)
-            policy_refs = set().union(*(r.refs for r in tap.rules_from_policy(policy))) if policy else set()
+            policy_refs = collect.collect_vault_refs(client)
         except Exception as exc:  # noqa: BLE001
-            print(f"REFUSING: cannot read the TAP policy to find vaults it references ({exc})", file=sys.stderr)
+            print(f"REFUSING: cannot read the TAP policies to find vaults they reference ({exc})", file=sys.stderr)
             return 1
         holds = {str(v["id"]): r for v in others if (r := sv.hold_reason(v, infos, cfg.vault_protect, policy_refs))}
         plans = sv.plan_vaults(vaults, dest_id, infos, prices, max_usd, holds=holds)

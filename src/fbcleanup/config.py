@@ -5,6 +5,7 @@ import os
 import re
 import stat
 from dataclasses import dataclass, field
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -25,6 +26,7 @@ _ALLOWED = {
     "rate_limit": {"max_calls_per_second"},
     "paths": {"state_dir", "reports_dir", "approvals_dir"},
     "audit_repo": {"path"},
+    "pricing": {"overrides"},
 }
 _PROTECT_KEYS = {"ids", "name_patterns", "customer_ref_id_prefixes", "tag_labels"}
 
@@ -66,6 +68,7 @@ class Config:
     reports_dir: str = "reports"
     approvals_dir: str = "approvals"
     audit_repo_path: str = ""
+    price_overrides: Dict[str, Decimal] = field(default_factory=dict)   # asset id -> USD per unit; beats every other price
 
 
 def _section(raw: Dict[str, Any], name: str) -> Dict[str, Any]:
@@ -86,6 +89,22 @@ def _protect(sec: Dict[str, Any], allowed: set) -> Protect:
     return Protect(**{k: list(map(str, p.get(k) or [])) for k in allowed})
 
 
+def _overrides(sec: Dict[str, Any]) -> Dict[str, Decimal]:
+    raw = sec.get("overrides") or {}
+    if not isinstance(raw, dict):
+        raise ConfigError("pricing.overrides must be a mapping of asset id -> USD per unit")
+    out: Dict[str, Decimal] = {}
+    for aid, v in raw.items():
+        try:
+            d = Decimal(str(v))
+        except InvalidOperation:
+            d = Decimal("NaN")
+        if isinstance(v, bool) or not d.is_finite() or d < 0:
+            raise ConfigError(f"pricing.overrides[{aid!r}] must be a number >= 0")
+        out[str(aid)] = d
+    return out
+
+
 def _int(v: Any, name: str, minimum: int = 0) -> int:
     if isinstance(v, bool) or not isinstance(v, int) or v < minimum:
         raise ConfigError(f"'{name}' must be an integer >= {minimum}")
@@ -102,6 +121,7 @@ def parse_config(raw: Optional[Dict[str, Any]]) -> Config:
     tg, us, au = _section(raw, "tags"), _section(raw, "users"), _section(raw, "audit")
     ap, rl, pa = _section(raw, "approvals"), _section(raw, "rate_limit"), _section(raw, "paths")
     ar = _section(raw, "audit_repo")
+    pc = _section(raw, "pricing")
 
     base_path = ws.get("base_path", "us")
     if base_path not in BASE_PATHS:
@@ -134,6 +154,7 @@ def parse_config(raw: Optional[Dict[str, Any]]) -> Config:
         reports_dir=str(pa.get("reports_dir", "reports")),
         approvals_dir=str(pa.get("approvals_dir", "approvals")),
         audit_repo_path=str(Path(str(ar["path"])).expanduser()) if ar.get("path") else "",
+        price_overrides=_overrides(pc),
     )
     if cfg.max_calls_per_second <= 0:
         raise ConfigError("rate_limit.max_calls_per_second must be > 0")

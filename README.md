@@ -182,6 +182,70 @@ unconfirmed or approval-gated transfer.
   most the cap. It never hides Canton-relevant vaults, `vault_protect` vaults or vaults referenced by the TAP, and
   never hides anything if the sweep stopped early. Reversible with `run_cleanup.py --undo-run <run-id>`.
 
+## Live prices and valuation (`scripts/price_vaults.py`, `src/fbcleanup/prices.py`)
+
+The API has no read-price endpoint (`set_asset_price` only writes), so the console's USD figures cannot be fetched.
+`prices.py` prices assets from CoinGecko's public API instead of transaction history, which returns nothing for an asset
+with no recent transfer. Only asset symbols and contract addresses leave the machine, over HTTPS with certificate
+verification on. Never writes anywhere.
+
+- Mainnet native coins: curated symbol to coin id. Mainnet tokens: exact contract address on the chain's CoinGecko
+  platform (one address per request on the free tier, with backoff on 429/5xx).
+- Testnet native coins and a short list of well-known testnet tokens are priced like their mainnet twin, as the console
+  does. A custom testnet token has no market and is reported UNPRICED, never as $0. A deprecated testnet native is still
+  priced (the console values it); other deprecated assets are unpriced.
+- `pricing.overrides` in the config pins an asset id to an explicit USD price, including 0. Custom tokens are worth $0 in
+  the console unless someone assigned a value in the tokenization engine, which the API cannot read, so those values
+  belong in the config.
+- A price that is not a plain positive number in a sane range, or whose CoinGecko timestamp is over an hour old, is
+  rejected.
+
+`price_vaults.py` is read-only: it values every visible vault per asset with the price source and lists unpriced assets
+with the reason. It re-reads each vault live because the paged vault listing can omit balances (deprecated assets).
+Console figures matched to the cent on every vault compared; the one known divergence is deprecated testnet coins, which
+the console prices at its own (older) rate.
+
+## Hide-only run (`scripts/hide_small.py`)
+
+Hides every vault whose current total USD value is at or under a cap (default $10), empty vaults included. Moves no
+funds; reversible with `run_cleanup.py --undo-run <run-id>`. Dry run by default; `--execute` plus exactly one of
+`--limit N` or `--all`. `--live-prices` values vaults with `prices.py` instead of transaction history. A vault holding an
+unpriced asset is left alone, as are the destination vault, Canton/DTCC vaults, `vault_protect` vaults and every vault
+referenced by an active rule of ANY policy type (`collect.collect_vault_refs`; the older single-type check missed
+vaults referenced only by AML, MINT/BURN or APPROVE rules). Each vault is re-read live right before it is hidden.
+
+## Specialised sweeps (`scripts/sweep_mainnet.py`, `scripts/sweep_canton.py`)
+
+Both move funds, so both share the sweep rules above (dry run, prod gate, `--limit`/`--all`, live re-read, stop on the
+first non-completed transfer).
+
+- `sweep_mainnet.py` sweeps non-frozen MAINNET balances out of vaults worth at most the cap before the sweep, then
+  hides them. Testnet balances never move. Not yet used against a real workspace.
+- `sweep_canton.py` sweeps every non-zero Canton-chain asset into one vault. The other sweeps skip Canton on purpose.
+  Observed behaviour: the network-fee estimate returns 0 for Canton while the recorded fee is -1, and a transfer of a
+  balance the vault reports as available failed with `INSUFFICIENT_FUNDS`, so verify before relying on it.
+
+## Unfreeze (`unfreeze_transaction`)
+
+The client exposes `unfreeze_transaction` (`POST /transactions/{txId}/unfreeze`) as a journaled, production-gated
+mutation; it only ever releases a transaction and never freezes. A workspace can block it with the
+`disableUnfreeze` limit (`PUT /screening/configurations`, write-only: no read endpoint), in which case the API returns
+`400 Unfreeze operation is disabled by your configuration` and the docs say a Fireblocks Support ticket is required. Do
+not change that limit without the workspace owner's explicit say-so: it is a compliance guard.
+
+## API behaviours worth knowing
+
+- `list_transactions` without `after` returns only about the last 90 days. Pass `after="1"` for complete history.
+  Per-vault newest transaction: `source_type=VAULT_ACCOUNT, source_id=ID, limit=1, order_by=createdAt, sort=DESC`, and
+  the same with `dest_type`/`dest_id`.
+- The paged vault listing can omit balances (deprecated assets such as retired testnets); use `get_vault` for a vault's
+  true balances.
+- Chainalysis V2 screening is bypassed (`UNSUPPORTED_ROUTE`) for vault-to-vault transfers and mostly for testnet assets
+  (`UNSUPPORTED_ASSET`, `BYPASSED_FAILURE`). Real hits need a mainnet asset on an external route (outgoing to an external
+  or one-time address, or an incoming deposit).
+- Vault-account hide state is the same in the paged listing and in `get_vault`; the console's list can load in batches,
+  so its header count can be lower than the API's.
+
 ## TAP rule naming
 
 [`docs/tap-naming-convention.md`](docs/tap-naming-convention.md) — the `[Scope] Subject (qualifier)`

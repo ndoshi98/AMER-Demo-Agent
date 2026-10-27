@@ -1,32 +1,28 @@
-# Where we left off (2026-10-20)
+# Where we left off
 
 ## State
-- Shell, README, skill/commands and 78 offline tests are done and pushed. Run `.venv/bin/python -m pytest -q` first.
-- `scripts/probe.py --online` has been run against the testnet workspace (read-only). Results are in the README under
-  "Settled by probe.py --online". Headline: the key can do every read; the audit API takes epoch **milliseconds**
-  (fixed); hidden vaults are **not** returned by the vault listing.
-- **Nothing has been executed.** No audit run, no `--execute`, no approval file, no state DB exists yet.
-- Local-only setup that is not in the repo: `config/.env` (gitignored; needs `FIREBLOCKS_API_KEY` and
-  `FIREBLOCKS_SECRET_PATH`) and the key file at mode 600. On a new machine, recreate from `config/.env.example`.
+- Everything is dry run by default; nothing executes without `--execute` (plus `--i-understand-this-is-prod` on a
+  production config). Run `.venv/bin/python -m pytest -q` first (offline, no credentials).
+- Built and verified against a testnet workspace, then used against a production demo workspace: TAP naming and cleanup
+  across all 14 policy types (drafts written by `write_tap_draft.py`, published by a human), fund sweeps, hide runs, an
+  idle-vault transaction scan, live pricing, and a read-only AML-screening investigation. See the README sections on live
+  prices, the hide-only run, specialised sweeps, unfreeze, and API behaviours.
+- Local-only, gitignored: `config/.env*`, `config/cleanup.*.yaml`, `reports/`, `state/`, `approvals/`.
 
-## Decisions made
-- Every irreversible deletion (wallets, connections, tags, console users) goes through the approval file, whether or
-  not a quorum also applies. Only hide/unhide (Tier 1) and propose-only output (TAP, renames) stay outside it.
-- `audit.activity_events` stays empty (any audit event counts as activity) because that flags fewer users.
-- `workspace.expected_name` is set to the testnet workspace name. Change it when pointing at another workspace.
+## Open items
+1. **Vault restructure.** A rename/group proposal (`Group - Role` names, tiers: core, optional, retire) exists as a local
+   report. Vault renames are not built into the tooling yet; they would be propose-only with a journal and an undo, like
+   the TAP renames.
+2. **AML demo rules.** An outgoing pre-screening rule whose destination is a vault can never match (vault-to-vault is not
+   screened); a post-screening rule's name should match its verdict. Both are draft-and-human-publish changes.
+3. **Unfreeze.** Blocked in the demo workspace by the `disableUnfreeze` limit; needs the owner or a Support ticket.
+4. **Canton sweeps.** `sweep_canton.py` failed with `INSUFFICIENT_FUNDS` on balances the vault reported as available;
+   needs a Fireblocks answer before it is trusted.
+5. **Unverified:** console valuation of deprecated testnet coins (the console uses its own, older rate), and whether the
+   console's vault list header count (batched loading) ever matches the API count.
+6. **Not built:** Tier 1 tag add/remove, `create_tag`, vault renames, non-TRANSFER policy analysis beyond naming.
 
 ## Next, in order
-1. **Start the quarantine clock early.** Quarantine needs 2 runs AND 14 days, so nothing can be hidden until two
-   observing audits are 14+ days apart. Do a first dry-run audit (`scripts/run_cleanup.py`, no `--execute`) soon.
-   Use `--no-observe` first if you want to read the report without advancing any clocks.
-2. Read the first report. About 31 of 60 vaults have all-zero totals (5 have no assets), so check the protect lists
-   (`keep-for-demo` tag, `name_patterns`) before the clock starts counting them.
-3. **Hidden vaults gap:** find out whether the SDK's vault listing has a parameter to include hidden vaults. If not,
-   tag usage and "already hidden" detection stay blind to them (details in the README).
-4. Still unverified: write permission (first `--execute`), the transaction time-walk, network-connection and wallet
-   list shapes, tag pagination (`next` cursor not implemented), and what deleting wallets or connections does.
-5. Try Tier 2 on a few throwaway objects in testnet. This also shows which deletes are quorum-gated.
-6. Only then consider the real demo workspace: new key, `expected_name`, `is_production`, and a fresh read-only probe.
-
-## Not built
-Tier 1 tag add/remove, `create_tag`, vault renames beyond duplicate-name suggestions, and non-TRANSFER policy types.
+1. Decide the vault structure tier cut, then build the rename step (dry run, journal, undo).
+2. Draft the AML rule fixes for human publish.
+3. Retry the unfreeze once the workspace limit is lifted.

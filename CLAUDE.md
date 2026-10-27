@@ -38,13 +38,23 @@ Built and verified against a **testnet** workspace first. The report is the prod
   no config key may bypass that.
 - `base_path` is NOT a production signal: testnet workspaces use `us`/`eu`/`eu2` too.
 
-- Fund movement exists only in `sweep.py` / `sweep_value.py` and `scripts/sweep.py` / `scripts/sweep_small.py`
-  (`create_transaction`, plus `create_vault_asset` for destination wallets). Cleanup code (`run_cleanup.py`,
-  `actions.py`) must never call them. Sweeps require `--limit`/`--all` to execute and stop at the first
+- Fund movement exists only in `sweep.py` / `sweep_value.py` / `sweep_mainnet.py` and `scripts/sweep.py` /
+  `sweep_small.py` / `sweep_mainnet.py` / `sweep_canton.py` (`create_transaction`, plus `create_vault_asset` for
+  destination wallets). Cleanup code (`run_cleanup.py`, `actions.py`) must never call them. Sweeps require `--limit`/`--all` to execute and stop at the first
   non-COMPLETED transfer.
 - **Testnet assets are NOT worth $0.** The console reports `amountUSD` on testnet transactions (ETH_TEST5 ~ ETH). Value
   caps must price testnet and mainnet alike, and an unpriced asset leaves its vault alone. Treating testnet as $0
   once moved vaults worth thousands of dollars.
+
+- `unfreeze_transaction` (client op, journaled) only ever RELEASES a transaction; never add a freeze. A workspace can block
+  it with `disableUnfreeze`; do not change that limit (`PUT /screening/configurations`) without the owner's explicit
+  say-so, it is a compliance guard.
+- Valuation: "no price" is never "$0". `prices.py` (CoinGecko, live) reports unpriced assets with a reason; custom
+  testnet tokens are $0 only via `pricing.overrides`. Decide hides from a live `get_vault` read: the paged vault listing
+  can omit balances (deprecated assets).
+- Anything that must not be touched because a TAP rule references it has to be checked across ALL policy types
+  (`collect.collect_vault_refs`), not just TRANSFER.
+- `list_transactions` without `after` returns only ~90 days; pass `after="1"` for complete history.
 
 ## Architecture (keep this shape)
 

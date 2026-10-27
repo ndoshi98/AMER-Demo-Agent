@@ -44,3 +44,13 @@ def test_env_file_override_replaces_environment_and_requires_both_keys(tmp_path,
         load_env_file(str(f), override=True)
     with pytest.raises(ConfigError):
         load_env_file(str(tmp_path / "missing"), override=True)
+
+
+def test_pricing_overrides_parse_and_reject_bad_values():
+    from decimal import Decimal
+    from fbcleanup.config import parse_config
+    assert parse_config({"pricing": {"overrides": {"DUSD": 0, "CUSD": "1.5"}}}).price_overrides == {"DUSD": Decimal(0), "CUSD": Decimal("1.5")}
+    assert parse_config({}).price_overrides == {}
+    for bad in ({"A": -1}, {"A": True}, {"A": "abc"}, {"A": float("inf")}, ["A"]):
+        with pytest.raises(ConfigError):
+            parse_config({"pricing": {"overrides": bad}})
